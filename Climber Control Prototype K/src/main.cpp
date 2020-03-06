@@ -33,9 +33,6 @@
 
 #define BufferRecords 64                    // 1Cycle Buffer Records 
 
-#define ASCALE 2        // 0:2G, 1:4G, 2:8G, 3:16G
-#define GSCALE 1        // 0:250dps, 1:500dps, 2:1000dps, 3:2000dps
-
 
 //Global
 //------------------------------------------------------------------//
@@ -67,6 +64,7 @@ unsigned char power = 0;
 
 // Main
 unsigned char pattern = 0;
+unsigned long time_buff = 0;
 
 // MPU
 float accX = 0.0F;
@@ -114,9 +112,6 @@ typedef struct {
 static RecordType buffer[2][BufferRecords];
 static volatile int writeBank = 0;
 static volatile int bufferIndex[2] = {0, 0};
-
-
-
 
 //Prototype
 //------------------------------------------------------------------//
@@ -173,18 +168,24 @@ void loop() {
     break;  
 
   case 11:
-    lcdDisplay();
+    //lcdDisplay();
     esc.write(power);
     if( total_count >= 100000 || total_count <= -100000 ) {
       power = 0;
-      total_count = 0;  
+      total_count = 0; 
+      time_buff = millis();
       pattern = 101;
       break;
     }
     break;
 
   case 101:
-    delay(5000);
+    //lcdDisplay();
+    if( millis() - time_buff >= 5000 ) {
+      time_buff = 0;
+      pattern = 0;
+      break;
+    }    
     break;
 
   }
@@ -421,7 +422,8 @@ void initPSRAM(void) {
 void lcdDisplay(void) {
 
   // Refresh Display
-  M5.Lcd.setTextColor(WHITE, BLACK);
+  //M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setCursor(10, 10);
   M5.Lcd.printf("Pattern: %3d", pattern);  
   M5.Lcd.setCursor(10, 40);
