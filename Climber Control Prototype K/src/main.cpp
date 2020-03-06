@@ -12,7 +12,11 @@
 //------------------------------------------------------------------//
 #include <M5Stack.h>
 #include <Servo.h>
+#include <Wire.h>
+#include <EEPROM.h>
 #include "driver/pcnt.h"
+#include "utility/MPU9250.h"
+
 
 
 //Define
@@ -26,7 +30,10 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
-#define BufferRecords 1024                  // 1Cycle Buffer Records 
+#define BufferRecords 512                   // 1Cycle Buffer Records 
+
+#define ASCALE 2        // 0:2G, 1:4G, 2:8G, 3:16G
+#define GSCALE 1        // 0:250dps, 1:500dps, 2:1000dps, 3:2000dps
 
 
 //Global
@@ -61,6 +68,17 @@ unsigned char power_buff;
 unsigned char pattern = 0;
 unsigned char pattern_buff;
 
+// MPU9250
+MPU9250 IMU; 
+float accelBiasX = 0;
+float accelBiasY = 0;
+float accelBiasZ = 0;
+float gyroBiasZ = 0;
+
+// Battery
+unsigned char battery_status;
+unsigned char battery_persent;
+
 //SD
 File file;
 String fname_buff;
@@ -73,11 +91,12 @@ typedef struct {
     unsigned char log_power;
     int16_t log_delta_count;
     long log_total_count;
-    long log_total_count2;
-    long log_total_count3;
-    long log_total_count4;
-    long log_total_count5;
-    long log_total_count6;
+    float log_IMU_ax;
+    float log_IMU_ay;
+    float log_IMU_az;
+    float log_IMU_gx;
+    float log_IMU_gy;
+    float log_IMU_gz;
 } RecordType;
 
 static RecordType buffer[2][BufferRecords];
@@ -115,8 +134,33 @@ void setup() {
 
   M5.Lcd.setTextSize(2);
 
-  
+  // Initialize IIC
+  Wire.begin();
+  Wire.setClock(400000);
 
+  // Initialize MPU9250
+  IMU.calibrateMPU9250(IMU.gyroBias, IMU.accelBias);
+  IMU.initMPU9250();
+  IMU.writeByte(MPU9250_ADDRESS, CONFIG, 0x00);
+  if(GSCALE == 0) {
+    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x00);  // 250dps
+  } else if(GSCALE == 1) {
+    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x08);  // 500dps
+  } else if(GSCALE == 2) {
+    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x10);  // 1000dps
+  } else {
+    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x18);  // 2000dps
+  }
+  if(ASCALE == 0) {
+    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x00); // 2G
+  } else if(ASCALE == 1) {
+    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x08); // 4G
+  } else if(ASCALE == 2) {
+    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x10); // 8G
+  } else {
+    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x18); // 16G
+  }
+  
   esc.attach(escPin, ESC_LDEC_CHANNEL, 0, 100, 1100, 1940);
   esc.write(0);
 
@@ -156,10 +200,33 @@ void taskDisplay(void *pvParameters){
 
   disableCore0WDT();
 
-  SD.begin(4, SPI, 24000000);
-  fname_buff  = "/log/Satellite_log_.csv";
-  fname = fname_buff.c_str();
+  SD.begin(4, SPI, 40000000);
   // Create Log File  
+  fname_buff  = "/Climber_log.csv";
+  fname = fname_buff.c_str(); 
+  file = SD.open(fname, FILE_APPEND); 
+  file.print("Time");
+  file.print(",");
+  file.print("Pattern");
+  file.print(",");
+  file.print("Power");
+  file.print(",");
+  file.print("Delta Count");
+  file.print(",");
+  file.print("Total Count");
+  file.print(",");
+  file.print("AX");
+  file.print(",");
+  file.print("AY");
+  file.print(",");
+  file.print("AZ");
+  file.print(",");
+  file.print("GX");
+  file.print(",");
+  file.print("GY");
+  file.print(",");
+  file.println("GZ");  
+  file.close();
 
   while(1){    
     int readBank = !writeBank;
@@ -180,15 +247,17 @@ void taskDisplay(void *pvParameters){
           file.print(",");
           file.print(temp[i].log_total_count);
           file.print(",");
-          file.print(temp[i].log_total_count2);
+          file.print(temp[i].log_IMU_ax);
           file.print(",");
-          file.print(temp[i].log_total_count3);
+          file.print(temp[i].log_IMU_ay);
           file.print(",");
-          file.print(temp[i].log_total_count4);
+          file.print(temp[i].log_IMU_az);
           file.print(",");
-          file.print(temp[i].log_total_count5);
+          file.print(temp[i].log_IMU_gx);
           file.print(",");
-          file.println(temp[i].log_total_count6);
+          file.print(temp[i].log_IMU_gy);
+          file.print(",");
+          file.println(temp[i].log_IMU_gz);
       }
       file.close();
     }
@@ -208,6 +277,22 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_0);  
     total_count += delta_count;
 
+    if (IMU.readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01) {  
+      IMU.readAccelData(IMU.accelCount);  // Read the x/y/z adc values
+      IMU.getAres();
+
+      IMU.ax = (float)IMU.accelCount[0]; // - accelBias[0];
+      IMU.ay = (float)IMU.accelCount[1]; // - accelBias[1];
+      IMU.az = (float)IMU.accelCount[2]; // - accelBias[2];
+
+      IMU.readGyroData(IMU.gyroCount);  // Read the x/y/z adc values
+      IMU.getGres();
+
+      IMU.gx = (float)IMU.gyroCount[0];
+      IMU.gy = (float)IMU.gyroCount[1];
+      IMU.gz = (float)IMU.gyroCount[2];
+    }
+
     if (bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
       rp->log_time = millis();
@@ -215,11 +300,12 @@ void timerInterrupt(void) {
       rp->log_power = power;
       rp->log_delta_count = delta_count;
       rp->log_total_count = total_count;
-      rp->log_total_count2 = total_count;
-      rp->log_total_count3 = total_count;
-      rp->log_total_count4 = total_count;
-      rp->log_total_count5 = total_count;
-      rp->log_total_count6 = total_count;
+      rp->log_IMU_ax = IMU.ax;
+      rp->log_IMU_ay = IMU.ay;
+      rp->log_IMU_az = IMU.az;
+      rp->log_IMU_gx = IMU.gx;
+      rp->log_IMU_gy = IMU.gy;
+      rp->log_IMU_gz = IMU.gz;
       if (++bufferIndex[writeBank] >= BufferRecords) {
           writeBank = !writeBank;
       }
