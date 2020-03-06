@@ -16,8 +16,6 @@
 #include <Servo.h>
 #include <EEPROM.h>
 #include "driver/pcnt.h"
-#include "utility/MPU9250.h"
-
 
 
 //Define
@@ -64,6 +62,8 @@ unsigned char power = 0;
 
 // Main
 unsigned char pattern = 0;
+unsigned long seq;
+unsigned long seq_buff;
 unsigned long time_buff = 0;
 
 // MPU
@@ -93,6 +93,7 @@ const char* fname;
 // Log
 typedef struct {
     unsigned long log_time;
+    unsigned long log_seq;
     unsigned char log_pattern;
     unsigned char log_power;
     int16_t log_delta_count;
@@ -122,6 +123,7 @@ void timerInterrupt(void);
 void initEncoder(void);
 void initPSRAM(void);
 void buttonAction(void);
+void initLCD(void);
 void lcdDisplay(void);
 
 //Setup
@@ -141,6 +143,7 @@ void setup() {
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
   M5.Lcd.setTextSize(2);
+  initLCD();
 
   // Initialize IIC
   Wire.begin();
@@ -151,6 +154,8 @@ void setup() {
   
   esc.attach(escPin, ESC_LDEC_CHANNEL, 0, 100, 1100, 1940);
   esc.write(0);
+
+  seq_buff = millis();
 
 }
 
@@ -168,21 +173,24 @@ void loop() {
     break;  
 
   case 11:
-    //lcdDisplay();
+    lcdDisplay();
     esc.write(power);
     if( total_count >= 100000 || total_count <= -100000 ) {
       power = 0;
       total_count = 0; 
       time_buff = millis();
+      seq_buff = millis();
       pattern = 101;
       break;
     }
     break;
 
   case 101:
-    //lcdDisplay();
+    lcdDisplay();
+    esc.write(0);
     if( millis() - time_buff >= 5000 ) {
       time_buff = 0;
+      seq_buff = millis();
       pattern = 0;
       break;
     }    
@@ -204,6 +212,8 @@ void taskDisplay(void *pvParameters){
   fname = fname_buff.c_str(); 
   file = SD.open(fname, FILE_APPEND); 
   file.print("Time");
+  file.print(",");
+  file.print("Sequence");
   file.print(",");
   file.print("Pattern");
   file.print(",");
@@ -244,6 +254,8 @@ void taskDisplay(void *pvParameters){
       file = SD.open(fname, FILE_APPEND);
       for (int i = 0; i < BufferRecords; i++) {
           file.print(temp[i].log_time);
+          file.print(",");
+          file.print(temp[i].log_seq);
           file.print(",");
           file.print(temp[i].log_pattern);
           file.print(",");
@@ -291,6 +303,8 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_0);  
     total_count += delta_count;
 
+    seq = millis() - seq_buff;
+
     M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
     M5.IMU.getAccelData(&accX,&accY,&accZ);
     M5.IMU.getAhrsData(&pitch,&roll,&yaw);
@@ -299,6 +313,7 @@ void timerInterrupt(void) {
     if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
       rp->log_time = millis();
+      rp->log_seq = seq;
       rp->log_pattern = pattern;
       rp->log_power = power;
       rp->log_delta_count = delta_count;
@@ -417,21 +432,38 @@ void initPSRAM(void) {
 
 }
 
+// Initialize LCD
+//------------------------------------------------------------------//
+void initLCD(void) {
+
+  // Refresh Display
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.printf("Pattern:");  
+  M5.Lcd.setCursor(10, 40);
+  M5.Lcd.printf("Counter value:");
+  M5.Lcd.setCursor(10, 70);
+  M5.Lcd.printf("Total Counter:"); 
+  M5.Lcd.setCursor(10, 100);
+  M5.Lcd.printf("Motor Power:");
+
+}
+
+
 // LCD Display
 //------------------------------------------------------------------//
 void lcdDisplay(void) {
 
   // Refresh Display
-  //M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setCursor(10, 10);
-  M5.Lcd.printf("Pattern: %3d", pattern);  
-  M5.Lcd.setCursor(10, 40);
-  M5.Lcd.printf("Counter value: %6d", delta_count);
-  M5.Lcd.setCursor(10, 70);
-  M5.Lcd.printf("Total Counter: %6d", total_count); 
-  M5.Lcd.setCursor(10, 100);
-  M5.Lcd.printf("Motor Power: %3d", power);
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(200, 10);
+  M5.Lcd.printf("%6d", pattern);  
+  M5.Lcd.setCursor(200, 40);
+  M5.Lcd.printf("%6d", delta_count);
+  M5.Lcd.setCursor(200, 70);
+  M5.Lcd.printf("%6d", total_count); 
+  M5.Lcd.setCursor(200, 100);
+  M5.Lcd.printf("%6d", power);
 
 }
 
@@ -441,6 +473,7 @@ void buttonAction(void){
   M5.update();
   if (M5.BtnA.wasPressed()) {
     if( pattern == 0 ) {
+      seq_buff = millis();
       pattern = 11;
     }
   } else if (M5.BtnB.wasPressed()) {
