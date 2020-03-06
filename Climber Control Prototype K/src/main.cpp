@@ -26,7 +26,7 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
-#define BufferRecords 10                  // 1Cycle Buffer Records 
+#define BufferRecords 1024                  // 1Cycle Buffer Records 
 
 
 //Global
@@ -61,7 +61,29 @@ unsigned char power_buff;
 unsigned char pattern = 0;
 unsigned char pattern_buff;
 
+//SD
+File file;
+String fname_buff;
+const char* fname;
+
 // Log
+typedef struct {
+    unsigned long log_time;
+    unsigned char log_pattern;
+    unsigned char log_power;
+    int16_t log_delta_count;
+    long log_total_count;
+    long log_total_count2;
+    long log_total_count3;
+    long log_total_count4;
+    long log_total_count5;
+    long log_total_count6;
+} RecordType;
+
+static RecordType buffer[2][BufferRecords];
+static volatile int writeBank = 0;
+static volatile int bufferIndex[2] = {0, 0};
+
 
 
 //Prototype
@@ -87,7 +109,7 @@ void setup() {
   timerAlarmEnable(timer); 
 
   initEncoder();
-  initPSRAM();
+  initPSRAM();  
 
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
@@ -131,9 +153,45 @@ void loop() {
 //Main #0
 //------------------------------------------------------------------//
 void taskDisplay(void *pvParameters){
-  disableCore0WDT();
-  while(1){    
 
+  disableCore0WDT();
+
+  SD.begin(4, SPI, 24000000);
+  fname_buff  = "/log/Satellite_log_.csv";
+  fname = fname_buff.c_str();
+  // Create Log File  
+
+  while(1){    
+    int readBank = !writeBank;
+    if (bufferIndex[readBank] >= BufferRecords) {
+      static RecordType temp[BufferRecords];
+
+      memcpy(temp, buffer[readBank], sizeof(temp));
+      bufferIndex[readBank] = 0;
+      file = SD.open(fname, FILE_APPEND);
+      for (int i = 0; i < BufferRecords; i++) {
+          file.print(temp[i].log_time);
+          file.print(",");
+          file.print(temp[i].log_pattern);
+          file.print(",");
+          file.print(temp[i].log_power);
+          file.print(",");
+          file.print(temp[i].log_delta_count);
+          file.print(",");
+          file.print(temp[i].log_total_count);
+          file.print(",");
+          file.print(temp[i].log_total_count2);
+          file.print(",");
+          file.print(temp[i].log_total_count3);
+          file.print(",");
+          file.print(temp[i].log_total_count4);
+          file.print(",");
+          file.print(temp[i].log_total_count5);
+          file.print(",");
+          file.println(temp[i].log_total_count6);
+      }
+      file.close();
+    }
   }
 }
 
@@ -149,6 +207,23 @@ void timerInterrupt(void) {
     pcnt_get_counter_value(PCNT_UNIT_0, &delta_count);
     pcnt_counter_clear(PCNT_UNIT_0);  
     total_count += delta_count;
+
+    if (bufferIndex[writeBank] < BufferRecords) {
+      RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
+      rp->log_time = millis();
+      rp->log_pattern = pattern;
+      rp->log_power = power;
+      rp->log_delta_count = delta_count;
+      rp->log_total_count = total_count;
+      rp->log_total_count2 = total_count;
+      rp->log_total_count3 = total_count;
+      rp->log_total_count4 = total_count;
+      rp->log_total_count5 = total_count;
+      rp->log_total_count6 = total_count;
+      if (++bufferIndex[writeBank] >= BufferRecords) {
+          writeBank = !writeBank;
+      }
+    }
     
     iTimer10++;
     switch (iTimer10) {
