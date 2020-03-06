@@ -26,8 +26,13 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
+#define BufferRecords 10                  // 1Cycle Buffer Records 
+
+
 //Global
 //------------------------------------------------------------------//
+
+TaskHandle_t task_handl;
 
 // Timer
 hw_timer_t * timer = NULL;
@@ -36,8 +41,8 @@ volatile int interruptCounter;
 int iTimer10;
 
 // PSRAM
-char *c_buf1, **c_buf2;
-uint16_t size1 = 10, size2 = 5;
+int memMax;
+char *p;
 
 // Encoder1
 int16_t delta_count = 0;                    // Delta Counter
@@ -56,10 +61,13 @@ unsigned char power_buff;
 unsigned char pattern = 0;
 unsigned char pattern_buff;
 
+// Log
+
 
 //Prototype
 //------------------------------------------------------------------//
 uint8_t getBatteryGauge(void);
+void taskDisplay(void *pvParameters);
 void IRAM_ATTR onTimer(void);
 void timerInterrupt(void);
 void initEncoder(void);
@@ -78,20 +86,21 @@ void setup() {
   timerAlarmWrite(timer, TIMER_INTERRUPT * 1000, true);
   timerAlarmEnable(timer); 
 
-  c_buf1 = (char *)ps_malloc(sizeof(char *) * size1 * size2);
-  c_buf2 = (char **)ps_malloc(sizeof(char *)* size2);
-
   initEncoder();
   initPSRAM();
 
+  xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
+
   M5.Lcd.setTextSize(2);
+
+  
 
   esc.attach(escPin, ESC_LDEC_CHANNEL, 0, 100, 1100, 1940);
   esc.write(0);
 
 }
 
-//Main
+//Main #1
 //------------------------------------------------------------------//
 void loop() {
 
@@ -117,6 +126,15 @@ void loop() {
 
   }
    
+}
+
+//Main #0
+//------------------------------------------------------------------//
+void taskDisplay(void *pvParameters){
+  disableCore0WDT();
+  while(1){    
+
+  }
 }
 
 // Timer Interrupt
@@ -194,29 +212,41 @@ void initEncoder(void) {
   pcnt_counter_resume(PCNT_UNIT_0);             // Start Count
 }
 
-// Initialize Encoder
+// Initialize PSRAM
 //------------------------------------------------------------------//
 void initPSRAM(void) {
-  for(int i = 0; i < size2; i++){
-    c_buf2[i] = c_buf1 + i * size1;
+
+  // 4194252byte >> 800ms
+  // 1024byte    >> 834us
+  // 64byte      >> 642us
+  
+  Serial.printf("Internal Total heap %d, internal Free Heap %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
+  Serial.printf("SPIRam Total heap %d, SPIRam Free Heap %d\n", ESP.getPsramSize(), ESP.getFreePsram());
+  Serial.printf("Flash Size %d, Flash Speed %d\n", ESP.getFlashChipSize(), ESP.getFlashChipSpeed());
+  Serial.printf("ChipRevision %d, Cpu Freq %d, SDK Version %s\n", ESP.getChipRevision(), ESP.getCpuFreqMHz(), ESP.getSdkVersion());
+  Serial.println("");
+
+  // SPRAM 
+  memMax= ESP.getFreePsram();
+  p = (char*) ps_calloc( memMax , sizeof(char) );
+
+  digitalWrite(26, HIGH);
+
+  // Memory Check
+  int i = 0;
+  while ( i < memMax ) {
+    p[i] = (char)i;
+    if ( p[i] != (char)i ) {
+      Serial.printf("write error at %d\n", i);
+      i--;
+      break;
+    }
+    i++;
   }
- 
-  multi_heap_info_t info;
-  heap_caps_get_info(&info, MALLOC_CAP_SPIRAM);
- 
-  Serial.printf("PSRAM total size = %d\r\n", info.total_free_bytes);
-  Serial.printf("PSRAM data size = %d\r\n", info.total_allocated_bytes);
- 
-  memcpy(c_buf2[0], "ABCDEFGHI", size1);
-  memcpy(c_buf2[1], "abcdefghi", size1);
-  memcpy(c_buf2[2], "Hello!!", size1);
-  memcpy(c_buf2[3], "World", size1);
-  memcpy(c_buf2[4], "Fire!!!", size1);
- 
-  for(int i = 0; i < size2; i++){
-    Serial.println(c_buf2[i]);
-  }
-  Serial.println(c_buf2[3][2]);
+
+  Serial.printf("%d bytes check Ok\n", i);
+  
+  free(p); // Clear
 
 }
 
