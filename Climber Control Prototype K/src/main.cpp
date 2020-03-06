@@ -31,7 +31,7 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
-#define BufferRecords 512                   // 1Cycle Buffer Records 
+#define BufferRecords 64                    // 1Cycle Buffer Records 
 
 #define ASCALE 2        // 0:2G, 1:4G, 2:8G, 3:16G
 #define GSCALE 1        // 0:250dps, 1:500dps, 2:1000dps, 3:2000dps
@@ -60,18 +60,13 @@ char *p;
 int16_t delta_count = 0;                    // Delta Counter
 long    total_count = 0;                    // Total Counter
 
-int16_t delta_count_buff;
-long    total_count_buff;
-
 // ESC
 static const int escPin = 26;
 Servo esc;
 unsigned char power = 0;
-unsigned char power_buff;
 
 // Main
 unsigned char pattern = 0;
-unsigned char pattern_buff;
 
 // MPU
 float accX = 0.0F;
@@ -119,6 +114,7 @@ typedef struct {
 static RecordType buffer[2][BufferRecords];
 static volatile int writeBank = 0;
 static volatile int bufferIndex[2] = {0, 0};
+
 
 
 
@@ -181,10 +177,14 @@ void loop() {
     esc.write(power);
     if( total_count >= 100000 || total_count <= -100000 ) {
       power = 0;
-      total_count = 0;    
-      pattern = 0;
+      total_count = 0;  
+      pattern = 101;
       break;
     }
+    break;
+
+  case 101:
+    delay(5000);
     break;
 
   }
@@ -295,7 +295,7 @@ void timerInterrupt(void) {
     M5.IMU.getAhrsData(&pitch,&roll,&yaw);
     M5.IMU.getTempData(&temp);
 
-    if (bufferIndex[writeBank] < BufferRecords) {
+    if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
       rp->log_time = millis();
       rp->log_pattern = pattern;
@@ -397,7 +397,6 @@ void initPSRAM(void) {
   memMax= ESP.getFreePsram();
   p = (char*) ps_calloc( memMax , sizeof(char) );
 
-  digitalWrite(26, HIGH);
 
   // Memory Check
   int i = 0;
@@ -421,33 +420,16 @@ void initPSRAM(void) {
 //------------------------------------------------------------------//
 void lcdDisplay(void) {
 
-  // Clear Display
-  //M5.Lcd.setTextColor(BLACK);
-  //M5.Lcd.setCursor(10, 10);
-  //M5.Lcd.printf("Pattern: %3d", pattern_buff);  
-  //M5.Lcd.setCursor(10, 40);
-  //M5.Lcd.printf("Delta Counter: %6d", delta_count_buff);  
-  //M5.Lcd.setCursor(10, 70);
-  //M5.Lcd.printf("Total Counter: %6d", total_count_buff); 
-  //M5.Lcd.setCursor(10, 100);
-  //M5.Lcd.printf("Motor Power: %3d", power_buff); 
-
   // Refresh Display
-  //M5.Lcd.setTextColor(WHITE);
-  //M5.Lcd.setCursor(10, 10);
-  //M5.Lcd.printf("Pattern: %3d", pattern);  
-  //M5.Lcd.setCursor(10, 40);
-  //M5.Lcd.printf("Counter value: %6d", delta_count);
-  //M5.Lcd.setCursor(10, 70);
-  //M5.Lcd.printf("Total Counter: %6d", total_count); 
-  //M5.Lcd.setCursor(10, 100);
-  //M5.Lcd.printf("Motor Power: %3d", power); 
-
-  // Load Buffer
-  pattern_buff = pattern;
-  delta_count_buff = delta_count;
-  total_count_buff = total_count;
-  power_buff = power;
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.printf("Pattern: %3d", pattern);  
+  M5.Lcd.setCursor(10, 40);
+  M5.Lcd.printf("Counter value: %6d", delta_count);
+  M5.Lcd.setCursor(10, 70);
+  M5.Lcd.printf("Total Counter: %6d", total_count); 
+  M5.Lcd.setCursor(10, 100);
+  M5.Lcd.printf("Motor Power: %3d", power);
 
 }
 
