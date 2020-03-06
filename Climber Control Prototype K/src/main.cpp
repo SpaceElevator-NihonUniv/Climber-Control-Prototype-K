@@ -10,9 +10,10 @@
  
 //Include
 //------------------------------------------------------------------//
+#define M5STACK_MPU6886 
+
 #include <M5Stack.h>
 #include <Servo.h>
-#include <Wire.h>
 #include <EEPROM.h>
 #include "driver/pcnt.h"
 #include "utility/MPU9250.h"
@@ -48,6 +49,10 @@ volatile int interruptCounter;
 int iTimer10;
 
 // PSRAM
+// platformio.ini Add ↓
+// build_flags =
+//    -DBOARD_HAS_PSRAM
+//    -mfix-esp32-psram-cache-issue
 int memMax;
 char *p;
 
@@ -68,12 +73,20 @@ unsigned char power_buff;
 unsigned char pattern = 0;
 unsigned char pattern_buff;
 
-// MPU9250
-MPU9250 IMU; 
-float accelBiasX = 0;
-float accelBiasY = 0;
-float accelBiasZ = 0;
-float gyroBiasZ = 0;
+// MPU
+float accX = 0.0F;
+float accY = 0.0F;
+float accZ = 0.0F;
+
+float gyroX = 0.0F;
+float gyroY = 0.0F;
+float gyroZ = 0.0F;
+
+float pitch = 0.0F;
+float roll  = 0.0F;
+float yaw   = 0.0F;
+
+float temp = 0.0F;
 
 // Battery
 unsigned char battery_status;
@@ -97,6 +110,10 @@ typedef struct {
     float log_IMU_gx;
     float log_IMU_gy;
     float log_IMU_gz;
+    float log_IMU_pitch;
+    float log_IMU_roll;
+    float log_IMU_yaw;
+    float log_IMU_temp;
 } RecordType;
 
 static RecordType buffer[2][BufferRecords];
@@ -128,7 +145,7 @@ void setup() {
   timerAlarmEnable(timer); 
 
   initEncoder();
-  initPSRAM();  
+  //initPSRAM();  
 
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
@@ -138,28 +155,8 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000);
 
-  // Initialize MPU9250
-  IMU.calibrateMPU9250(IMU.gyroBias, IMU.accelBias);
-  IMU.initMPU9250();
-  IMU.writeByte(MPU9250_ADDRESS, CONFIG, 0x00);
-  if(GSCALE == 0) {
-    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x00);  // 250dps
-  } else if(GSCALE == 1) {
-    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x08);  // 500dps
-  } else if(GSCALE == 2) {
-    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x10);  // 1000dps
-  } else {
-    IMU.writeByte(MPU9250_ADDRESS, GYRO_CONFIG, 0x18);  // 2000dps
-  }
-  if(ASCALE == 0) {
-    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x00); // 2G
-  } else if(ASCALE == 1) {
-    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x08); // 4G
-  } else if(ASCALE == 2) {
-    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x10); // 8G
-  } else {
-    IMU.writeByte(MPU9250_ADDRESS, ACCEL_CONFIG, 0x18); // 16G
-  }
+  // Initialize MPU
+  M5.IMU.Init();
   
   esc.attach(escPin, ESC_LDEC_CHANNEL, 0, 100, 1100, 1940);
   esc.write(0);
@@ -225,7 +222,15 @@ void taskDisplay(void *pvParameters){
   file.print(",");
   file.print("GY");
   file.print(",");
-  file.println("GZ");  
+  file.print("GZ"); 
+  file.print(","); 
+  file.print("Pitch");
+  file.print(",");
+  file.print("Roll");
+  file.print(",");
+  file.print("Yaw");
+  file.print(",");
+  file.println("Temp");  
   file.close();
 
   while(1){    
@@ -257,7 +262,15 @@ void taskDisplay(void *pvParameters){
           file.print(",");
           file.print(temp[i].log_IMU_gy);
           file.print(",");
-          file.println(temp[i].log_IMU_gz);
+          file.print(temp[i].log_IMU_gz);
+          file.print(",");
+          file.print(temp[i].log_IMU_pitch);
+          file.print(",");
+          file.print(temp[i].log_IMU_roll);
+          file.print(",");
+          file.print(temp[i].log_IMU_yaw);
+          file.print(",");
+          file.println(temp[i].log_IMU_temp);
       }
       file.close();
     }
@@ -277,21 +290,10 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_0);  
     total_count += delta_count;
 
-    if (IMU.readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01) {  
-      IMU.readAccelData(IMU.accelCount);  // Read the x/y/z adc values
-      IMU.getAres();
-
-      IMU.ax = (float)IMU.accelCount[0]; // - accelBias[0];
-      IMU.ay = (float)IMU.accelCount[1]; // - accelBias[1];
-      IMU.az = (float)IMU.accelCount[2]; // - accelBias[2];
-
-      IMU.readGyroData(IMU.gyroCount);  // Read the x/y/z adc values
-      IMU.getGres();
-
-      IMU.gx = (float)IMU.gyroCount[0];
-      IMU.gy = (float)IMU.gyroCount[1];
-      IMU.gz = (float)IMU.gyroCount[2];
-    }
+    M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
+    M5.IMU.getAccelData(&accX,&accY,&accZ);
+    M5.IMU.getAhrsData(&pitch,&roll,&yaw);
+    M5.IMU.getTempData(&temp);
 
     if (bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
@@ -300,12 +302,16 @@ void timerInterrupt(void) {
       rp->log_power = power;
       rp->log_delta_count = delta_count;
       rp->log_total_count = total_count;
-      rp->log_IMU_ax = IMU.ax;
-      rp->log_IMU_ay = IMU.ay;
-      rp->log_IMU_az = IMU.az;
-      rp->log_IMU_gx = IMU.gx;
-      rp->log_IMU_gy = IMU.gy;
-      rp->log_IMU_gz = IMU.gz;
+      rp->log_IMU_ax = accX;
+      rp->log_IMU_ay = accY;
+      rp->log_IMU_az = accZ;
+      rp->log_IMU_gx = gyroX;
+      rp->log_IMU_gy = gyroY;
+      rp->log_IMU_gz = gyroZ;
+      rp->log_IMU_pitch = pitch;
+      rp->log_IMU_roll = roll;
+      rp->log_IMU_yaw = yaw;
+      rp->log_IMU_temp = temp;
       if (++bufferIndex[writeBank] >= BufferRecords) {
           writeBank = !writeBank;
       }
@@ -416,26 +422,26 @@ void initPSRAM(void) {
 void lcdDisplay(void) {
 
   // Clear Display
-  M5.Lcd.setTextColor(BLACK);
-  M5.Lcd.setCursor(10, 10);
-  M5.Lcd.printf("Pattern: %3d", pattern_buff);  
-  M5.Lcd.setCursor(10, 40);
-  M5.Lcd.printf("Delta Counter: %6d", delta_count_buff);  
-  M5.Lcd.setCursor(10, 70);
-  M5.Lcd.printf("Total Counter: %6d", total_count_buff); 
-  M5.Lcd.setCursor(10, 100);
-  M5.Lcd.printf("Motor Power: %3d", power_buff); 
+  //M5.Lcd.setTextColor(BLACK);
+  //M5.Lcd.setCursor(10, 10);
+  //M5.Lcd.printf("Pattern: %3d", pattern_buff);  
+  //M5.Lcd.setCursor(10, 40);
+  //M5.Lcd.printf("Delta Counter: %6d", delta_count_buff);  
+  //M5.Lcd.setCursor(10, 70);
+  //M5.Lcd.printf("Total Counter: %6d", total_count_buff); 
+  //M5.Lcd.setCursor(10, 100);
+  //M5.Lcd.printf("Motor Power: %3d", power_buff); 
 
   // Refresh Display
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setCursor(10, 10);
-  M5.Lcd.printf("Pattern: %3d", pattern);  
-  M5.Lcd.setCursor(10, 40);
-  M5.Lcd.printf("Counter value: %6d", delta_count);
-  M5.Lcd.setCursor(10, 70);
-  M5.Lcd.printf("Total Counter: %6d", total_count); 
-  M5.Lcd.setCursor(10, 100);
-  M5.Lcd.printf("Motor Power: %3d", power); 
+  //M5.Lcd.setTextColor(WHITE);
+  //M5.Lcd.setCursor(10, 10);
+  //M5.Lcd.printf("Pattern: %3d", pattern);  
+  //M5.Lcd.setCursor(10, 40);
+  //M5.Lcd.printf("Counter value: %6d", delta_count);
+  //M5.Lcd.setCursor(10, 70);
+  //M5.Lcd.printf("Total Counter: %6d", total_count); 
+  //M5.Lcd.setCursor(10, 100);
+  //M5.Lcd.printf("Motor Power: %3d", power); 
 
   // Load Buffer
   pattern_buff = pattern;
