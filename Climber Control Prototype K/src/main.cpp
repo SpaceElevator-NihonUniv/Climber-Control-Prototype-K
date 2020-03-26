@@ -22,10 +22,18 @@
 //------------------------------------------------------------------//
 #define TIMER_INTERRUPT 10                  // Timer Interrupt Period
 
-#define ESC_LDEC_CHANNEL 3                  // 50Hz LDEC Timer
+                                            // LDEC CH 0-2,6-7 not use
+#define KOSMIK1_LDEC_CHANNEL 3              // 50Hz LDEC Timer
+#define KOSMIK2_LDEC_CHANNEL 4              // 50Hz LDEC Timer
+#define TURNIGY1_LDEC_CHANNEL 5             // 50Hz LDEC Timer
+#define TURNIGY2_LDEC_CHANNEL 8             // 50Hz LDEC Timer
 
-#define PULSE_INPUT_PIN 35                  // Rotaly Encoder Phase A
-#define PULSE_CTRL_PIN  36                  // Rotaly Encoder Phase B
+#define PULSE1_INPUT_PIN 35                 // Rotaly Encoder Phase A
+#define PULSE1_CTRL_PIN  36                 // Rotaly Encoder Phase B
+#define PULSE2_INPUT_PIN 25                 // Rotaly Encoder Phase A
+#define PULSE2_CTRL_PIN  26                 // Rotaly Encoder Phase B
+#define PULSE3_INPUT_PIN 2                  // Rotaly Encoder Phase A
+#define PULSE3_CTRL_PIN  5                  // Rotaly Encoder Phase B
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
@@ -51,14 +59,26 @@ int iTimer10;
 int memMax;
 char *p;
 
-// Encoder1
-int16_t delta_count = 0;                    // Delta Counter
-long    total_count = 0;                    // Total Counter
+// Encoder
+int16_t delta_count1 = 0;                    // Delta Counter
+long    total_count1 = 0;                    // Total Counter
+int16_t delta_count2 = 0;                    // Delta Counter
+long    total_count2 = 0;                    // Total Counter
+int16_t delta_count3 = 0;                    // Delta Counter
+long    total_count3 = 0;                    // Total Counter
 
-// ESC
-static const int escPin = 26;
-Servo esc;
+// ESC Kosmik
+static const int kosmik1Pin = 15;
+Servo kosmik1;
+static const int kosmik2Pin = 0;
+Servo kosmik2;
 unsigned char power = 0;
+
+// ESC Turnigy
+static const int turnigy1Pin = 12;
+Servo turnigy1;
+static const int turnigy2Pin = 13;
+Servo turnigy2;
 
 // Main
 unsigned char pattern = 0;
@@ -85,6 +105,11 @@ float temp = 0.0F;
 unsigned char battery_status;
 unsigned char battery_persent;
 
+// RSSI
+const int rssiPin = 34;
+unsigned int duration;
+int rssi_value;
+
 //SD
 File file;
 String fname_buff;
@@ -96,8 +121,8 @@ typedef struct {
     unsigned long log_seq;
     unsigned char log_pattern;
     unsigned char log_power;
-    int16_t log_delta_count;
-    long log_total_count;
+    int16_t log_delta_count1;
+    long log_total_count1;
     float log_IMU_ax;
     float log_IMU_ay;
     float log_IMU_az;
@@ -131,6 +156,9 @@ void lcdDisplay(void);
 void setup() {
 
   M5.begin();
+
+  Serial2.begin(57600);
+
   // Initialize Timer Interrupt
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
@@ -139,6 +167,8 @@ void setup() {
 
   initEncoder();
   //initPSRAM();  
+
+  pinMode(rssiPin, INPUT);
 
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
@@ -152,10 +182,16 @@ void setup() {
   // Initialize MPU
   M5.IMU.Init();
   
-  esc.attach(escPin, ESC_LDEC_CHANNEL, 0, 100, 1100, 1940);
-  esc.write(0);
+  kosmik1.attach(kosmik1Pin, KOSMIK1_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  kosmik1.write(0);
+  kosmik2.attach(kosmik2Pin, KOSMIK2_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  kosmik2.write(50);
+  turnigy1.attach(turnigy1Pin, TURNIGY1_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  turnigy1.write(75);
+  turnigy2.attach(turnigy2Pin, TURNIGY2_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  turnigy2.write(100);
 
-  seq_buff = millis();
+  seq_buff = millis();  
 
 }
 
@@ -167,17 +203,17 @@ void loop() {
 
   switch (pattern) {
   case 0:    
-    esc.write(0);
+    kosmik1.write(0);
     lcdDisplay();
     buttonAction();
     break;  
 
   case 11:
     lcdDisplay();
-    esc.write(power);
-    if( total_count >= 100000 || total_count <= -100000 ) {
+    kosmik1.write(power);
+    if( total_count1 >= 100000 || total_count1 <= -100000 ) {
       power = 0;
-      total_count = 0; 
+      total_count1 = 0; 
       time_buff = millis();
       seq_buff = millis();
       pattern = 101;
@@ -187,7 +223,7 @@ void loop() {
 
   case 101:
     lcdDisplay();
-    esc.write(0);
+    kosmik1.write(0);
     if( millis() - time_buff >= 5000 ) {
       time_buff = 0;
       seq_buff = millis();
@@ -261,9 +297,9 @@ void taskDisplay(void *pvParameters){
           file.print(",");
           file.print(temp[i].log_power);
           file.print(",");
-          file.print(temp[i].log_delta_count);
+          file.print(temp[i].log_delta_count1);
           file.print(",");
-          file.print(temp[i].log_total_count);
+          file.print(temp[i].log_total_count1);
           file.print(",");
           file.print(temp[i].log_IMU_ax);
           file.print(",");
@@ -299,9 +335,17 @@ void timerInterrupt(void) {
     interruptCounter--;
     portEXIT_CRITICAL(&timerMux);
     
-    pcnt_get_counter_value(PCNT_UNIT_0, &delta_count);
+    pcnt_get_counter_value(PCNT_UNIT_0, &delta_count1);
     pcnt_counter_clear(PCNT_UNIT_0);  
-    total_count += delta_count;
+    total_count1 += delta_count1;
+    pcnt_get_counter_value(PCNT_UNIT_1, &delta_count2);
+    pcnt_counter_clear(PCNT_UNIT_1);  
+    total_count2 += delta_count2;
+    pcnt_get_counter_value(PCNT_UNIT_2, &delta_count3);
+    pcnt_counter_clear(PCNT_UNIT_2);  
+    total_count3 += delta_count3;
+
+    Serial2.printf("Time %d\n",millis());
 
     seq = millis() - seq_buff;
 
@@ -316,8 +360,8 @@ void timerInterrupt(void) {
       rp->log_seq = seq;
       rp->log_pattern = pattern;
       rp->log_power = power;
-      rp->log_delta_count = delta_count;
-      rp->log_total_count = total_count;
+      rp->log_delta_count1 = delta_count1;
+      rp->log_total_count1 = total_count1;
       rp->log_IMU_ax = accX;
       rp->log_IMU_ay = accY;
       rp->log_IMU_az = accZ;
@@ -339,6 +383,13 @@ void timerInterrupt(void) {
       if(pattern == 11 && (power < 100)) power++;
       break;
     case 2:
+      duration = pulseIn(rssiPin, HIGH, 100);
+      if( duration == 0 ) {
+        if( digitalRead(rssiPin) ) {
+          duration = 70;
+        }
+      }
+      
       break;
     case 3:
       break;
@@ -365,8 +416,8 @@ void timerInterrupt(void) {
 //------------------------------------------------------------------//
 void initEncoder(void) {
   pcnt_config_t pcnt_config_1A;
-    pcnt_config_1A.pulse_gpio_num = PULSE_INPUT_PIN;
-    pcnt_config_1A.ctrl_gpio_num = PULSE_CTRL_PIN;
+    pcnt_config_1A.pulse_gpio_num = PULSE1_INPUT_PIN;
+    pcnt_config_1A.ctrl_gpio_num = PULSE1_CTRL_PIN;
     pcnt_config_1A.lctrl_mode = PCNT_MODE_REVERSE;
     pcnt_config_1A.hctrl_mode = PCNT_MODE_KEEP;
     pcnt_config_1A.channel = PCNT_CHANNEL_0;
@@ -377,8 +428,8 @@ void initEncoder(void) {
     pcnt_config_1A.counter_l_lim = PCNT_L_LIM_VAL;
 
   pcnt_config_t pcnt_config_1B;
-    pcnt_config_1B.pulse_gpio_num = PULSE_CTRL_PIN;
-    pcnt_config_1B.ctrl_gpio_num = PULSE_INPUT_PIN;
+    pcnt_config_1B.pulse_gpio_num = PULSE1_CTRL_PIN;
+    pcnt_config_1B.ctrl_gpio_num = PULSE1_INPUT_PIN;
     pcnt_config_1B.lctrl_mode = PCNT_MODE_KEEP;
     pcnt_config_1B.hctrl_mode = PCNT_MODE_REVERSE;
     pcnt_config_1B.channel = PCNT_CHANNEL_1;
@@ -388,11 +439,69 @@ void initEncoder(void) {
     pcnt_config_1B.counter_h_lim = PCNT_H_LIM_VAL;
     pcnt_config_1B.counter_l_lim = PCNT_L_LIM_VAL;
 
+  pcnt_config_t pcnt_config_2A;
+    pcnt_config_2A.pulse_gpio_num = PULSE2_INPUT_PIN;
+    pcnt_config_2A.ctrl_gpio_num = PULSE2_CTRL_PIN;
+    pcnt_config_2A.lctrl_mode = PCNT_MODE_REVERSE;
+    pcnt_config_2A.hctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config_2A.channel = PCNT_CHANNEL_0;
+    pcnt_config_2A.unit = PCNT_UNIT_1;
+    pcnt_config_2A.pos_mode = PCNT_COUNT_INC;
+    pcnt_config_2A.neg_mode = PCNT_COUNT_DEC;
+    pcnt_config_2A.counter_h_lim = PCNT_H_LIM_VAL;
+    pcnt_config_2A.counter_l_lim = PCNT_L_LIM_VAL;
+
+  pcnt_config_t pcnt_config_2B;
+    pcnt_config_2B.pulse_gpio_num = PULSE2_CTRL_PIN;
+    pcnt_config_2B.ctrl_gpio_num = PULSE2_INPUT_PIN;
+    pcnt_config_2B.lctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config_2B.hctrl_mode = PCNT_MODE_REVERSE;
+    pcnt_config_2B.channel = PCNT_CHANNEL_1;
+    pcnt_config_2B.unit = PCNT_UNIT_1;
+    pcnt_config_2B.pos_mode = PCNT_COUNT_INC;
+    pcnt_config_2B.neg_mode = PCNT_COUNT_DEC;
+    pcnt_config_2B.counter_h_lim = PCNT_H_LIM_VAL;
+    pcnt_config_2B.counter_l_lim = PCNT_L_LIM_VAL;
+
+  pcnt_config_t pcnt_config_3A;
+    pcnt_config_3A.pulse_gpio_num = PULSE3_INPUT_PIN;
+    pcnt_config_3A.ctrl_gpio_num = PULSE3_CTRL_PIN;
+    pcnt_config_3A.lctrl_mode = PCNT_MODE_REVERSE;
+    pcnt_config_3A.hctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config_3A.channel = PCNT_CHANNEL_0;
+    pcnt_config_3A.unit = PCNT_UNIT_2;
+    pcnt_config_3A.pos_mode = PCNT_COUNT_INC;
+    pcnt_config_3A.neg_mode = PCNT_COUNT_DEC;
+    pcnt_config_3A.counter_h_lim = PCNT_H_LIM_VAL;
+    pcnt_config_3A.counter_l_lim = PCNT_L_LIM_VAL;
+
+  pcnt_config_t pcnt_config_3B;
+    pcnt_config_3B.pulse_gpio_num = PULSE3_CTRL_PIN;
+    pcnt_config_3B.ctrl_gpio_num = PULSE3_INPUT_PIN;
+    pcnt_config_3B.lctrl_mode = PCNT_MODE_KEEP;
+    pcnt_config_3B.hctrl_mode = PCNT_MODE_REVERSE;
+    pcnt_config_3B.channel = PCNT_CHANNEL_1;
+    pcnt_config_3B.unit = PCNT_UNIT_2;
+    pcnt_config_3B.pos_mode = PCNT_COUNT_INC;
+    pcnt_config_3B.neg_mode = PCNT_COUNT_DEC;
+    pcnt_config_3B.counter_h_lim = PCNT_H_LIM_VAL;
+    pcnt_config_3B.counter_l_lim = PCNT_L_LIM_VAL;
+
   pcnt_unit_config(&pcnt_config_1A);            // Initialize Unit 1A
   pcnt_unit_config(&pcnt_config_1B);            // Initialize Unit 1B
+  pcnt_unit_config(&pcnt_config_2A);            // Initialize Unit 1A
+  pcnt_unit_config(&pcnt_config_2B);            // Initialize Unit 1B
+  pcnt_unit_config(&pcnt_config_3A);            // Initialize Unit 1A
+  pcnt_unit_config(&pcnt_config_3B);            // Initialize Unit 1B
   pcnt_counter_pause(PCNT_UNIT_0);              // Stop Counter
+  pcnt_counter_pause(PCNT_UNIT_1);              // Stop Counter
+  pcnt_counter_pause(PCNT_UNIT_2);              // Stop Counter
   pcnt_counter_clear(PCNT_UNIT_0);              // clear Counter
+  pcnt_counter_clear(PCNT_UNIT_1);              // clear Counter
+  pcnt_counter_clear(PCNT_UNIT_2);              // clear Counter
   pcnt_counter_resume(PCNT_UNIT_0);             // Start Count
+  pcnt_counter_resume(PCNT_UNIT_1);             // Start Count
+  pcnt_counter_resume(PCNT_UNIT_2);             // Start Count
 }
 
 // Initialize PSRAM
@@ -441,11 +550,15 @@ void initLCD(void) {
   M5.Lcd.setCursor(10, 10);
   M5.Lcd.printf("Pattern:");  
   M5.Lcd.setCursor(10, 40);
-  M5.Lcd.printf("Counter value:");
+  M5.Lcd.printf("Total Counter 1:"); 
   M5.Lcd.setCursor(10, 70);
-  M5.Lcd.printf("Total Counter:"); 
+  M5.Lcd.printf("Total Counter 2:"); 
   M5.Lcd.setCursor(10, 100);
-  M5.Lcd.printf("Motor Power:");
+  M5.Lcd.printf("Total Counter 3:"); 
+  M5.Lcd.setCursor(10, 130);
+  M5.Lcd.printf("Motor Power :"); 
+  M5.Lcd.setCursor(10, 160);
+  M5.Lcd.printf("RSSI :"); 
 
 }
 
@@ -456,14 +569,18 @@ void lcdDisplay(void) {
 
   // Refresh Display
   M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setCursor(200, 10);
+  M5.Lcd.setCursor(220, 10);
   M5.Lcd.printf("%6d", pattern);  
-  M5.Lcd.setCursor(200, 40);
-  M5.Lcd.printf("%6d", delta_count);
-  M5.Lcd.setCursor(200, 70);
-  M5.Lcd.printf("%6d", total_count); 
-  M5.Lcd.setCursor(200, 100);
-  M5.Lcd.printf("%6d", power);
+  M5.Lcd.setCursor(220, 40);
+  M5.Lcd.printf("%6d", total_count1); 
+  M5.Lcd.setCursor(220, 70);
+  M5.Lcd.printf("%6d", total_count2); 
+  M5.Lcd.setCursor(220, 100);
+  M5.Lcd.printf("%6d", total_count3);
+  M5.Lcd.setCursor(220, 130);
+  M5.Lcd.printf("%3d", power);
+  M5.Lcd.setCursor(220, 160);
+  M5.Lcd.printf("%3d", duration);
 
 }
 
