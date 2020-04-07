@@ -12,9 +12,11 @@
 //------------------------------------------------------------------//
 #define M5STACK_MPU6886 
 
+#include <stdint.h>
 #include <M5Stack.h>
 #include <Servo.h>
 #include <EEPROM.h>
+#include <LIDARLite_v3HP.h>
 #include "driver/pcnt.h"
 
 
@@ -22,11 +24,12 @@
 //------------------------------------------------------------------//
 #define TIMER_INTERRUPT 10                  // Timer Interrupt Period
 
+#define FAST_I2C
                                             // LDEC CH 0-2,6-7 not use
-#define KOSMIK1_LDEC_CHANNEL 3              // 50Hz LDEC Timer
-#define KOSMIK2_LDEC_CHANNEL 4              // 50Hz LDEC Timer
-#define TURNIGY1_LDEC_CHANNEL 5             // 50Hz LDEC Timer
-#define TURNIGY2_LDEC_CHANNEL 8             // 50Hz LDEC Timer
+#define KOSMIK1_LEDC_CHANNEL 3              // 50Hz LEDC Timer
+#define KOSMIK2_LEDC_CHANNEL 4              // 50Hz LEDC Timer
+#define TURNIGY1_LEDC_CHANNEL 5             // 50Hz LEDC Timer
+#define TURNIGY2_LEDC_CHANNEL 8             // 50Hz LEDC Timer
 
 #define PULSE1_INPUT_PIN 35                 // Rotaly Encoder Phase A
 #define PULSE1_CTRL_PIN  36                 // Rotaly Encoder Phase B
@@ -80,6 +83,11 @@ Servo turnigy1;
 static const int turnigy2Pin = 13;
 Servo turnigy2;
 
+// LIDAR
+LIDARLite_v3HP LidarLite1;
+uint16_t distance1;
+uint8_t  newDistance1 = 0;
+
 // Main
 unsigned char pattern = 0;
 unsigned long seq;
@@ -123,16 +131,21 @@ typedef struct {
     unsigned char log_power;
     int16_t log_delta_count1;
     long log_total_count1;
-    float log_IMU_ax;
-    float log_IMU_ay;
-    float log_IMU_az;
-    float log_IMU_gx;
-    float log_IMU_gy;
-    float log_IMU_gz;
-    float log_IMU_pitch;
-    float log_IMU_roll;
-    float log_IMU_yaw;
-    float log_IMU_temp;
+    int16_t log_delta_count2;
+    long log_total_count2;
+    int16_t log_delta_count3;
+    long log_total_count3;
+    uint16_t log_distance1;
+    //float log_IMU_ax;
+    //float log_IMU_ay;
+    //float log_IMU_az;
+    //float log_IMU_gx;
+    //float log_IMU_gy;
+    //float log_IMU_gz;
+    //float log_IMU_pitch;
+    //float log_IMU_roll;
+    //float log_IMU_yaw;
+    //float log_IMU_temp;
 } RecordType;
 
 static RecordType buffer[2][BufferRecords];
@@ -150,6 +163,7 @@ void initPSRAM(void);
 void buttonAction(void);
 void initLCD(void);
 void lcdDisplay(void);
+uint8_t distanceContinuous(uint16_t * distance1);
 
 //Setup
 //------------------------------------------------------------------//
@@ -169,6 +183,8 @@ void setup() {
   //initPSRAM();  
 
   pinMode(rssiPin, INPUT);
+  pinMode(21, INPUT_PULLUP);
+  pinMode(22, INPUT_PULLUP);
 
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
@@ -179,19 +195,23 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000);
 
+
   // Initialize MPU
-  M5.IMU.Init();
+  //M5.IMU.Init();
   
-  kosmik1.attach(kosmik1Pin, KOSMIK1_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  kosmik1.attach(kosmik1Pin, KOSMIK1_LEDC_CHANNEL, 0, 100, 1100, 1940);
   kosmik1.write(0);
-  kosmik2.attach(kosmik2Pin, KOSMIK2_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  kosmik2.attach(kosmik2Pin, KOSMIK2_LEDC_CHANNEL, 0, 100, 1100, 1940);
   kosmik2.write(50);
-  turnigy1.attach(turnigy1Pin, TURNIGY1_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  turnigy1.attach(turnigy1Pin, TURNIGY1_LEDC_CHANNEL, 0, 100, 1100, 1940);
   turnigy1.write(75);
-  turnigy2.attach(turnigy2Pin, TURNIGY2_LDEC_CHANNEL, 0, 100, 1100, 1940);
+  turnigy2.attach(turnigy2Pin, TURNIGY2_LEDC_CHANNEL, 0, 100, 1100, 1940);
   turnigy2.write(100);
 
   seq_buff = millis();  
+
+  LidarLite1.configure(0); 
+  delay(100);
 
 }
 
@@ -203,8 +223,8 @@ void loop() {
 
   switch (pattern) {
   case 0:    
-    kosmik1.write(0);
     lcdDisplay();
+    kosmik1.write(0);    
     buttonAction();
     break;  
 
@@ -255,29 +275,39 @@ void taskDisplay(void *pvParameters){
   file.print(",");
   file.print("Power");
   file.print(",");
-  file.print("Delta Count");
+  file.print("Delta Count1");
   file.print(",");
-  file.print("Total Count");
+  file.print("Total Count1");
   file.print(",");
-  file.print("AX");
+  file.print("Delta Count2");
   file.print(",");
-  file.print("AY");
+  file.print("Total Count2");
   file.print(",");
-  file.print("AZ");
+  file.print("Delta Count3");
   file.print(",");
-  file.print("GX");
+  file.print("Total Count3");
   file.print(",");
-  file.print("GY");
-  file.print(",");
-  file.print("GZ"); 
-  file.print(","); 
-  file.print("Pitch");
-  file.print(",");
-  file.print("Roll");
-  file.print(",");
-  file.print("Yaw");
-  file.print(",");
-  file.println("Temp");  
+  file.println("Distance1");
+  //file.print(",");
+  //file.print("AX");
+  //file.print(",");
+  //file.print("AY");
+  //file.print(",");
+  //file.print("AZ");
+  //file.print(",");
+  //file.print("GX");
+  //file.print(",");
+  //file.print("GY");
+  //file.print(",");
+  //file.print("GZ"); 
+  //file.print(","); 
+  //file.print("Pitch");
+  //file.print(",");
+  //file.print("Roll");
+  //file.print(",");
+  //file.print("Yaw");
+  //file.print(",");
+  //file.println("Temp");  
   file.close();
 
   while(1){    
@@ -301,25 +331,35 @@ void taskDisplay(void *pvParameters){
           file.print(",");
           file.print(temp[i].log_total_count1);
           file.print(",");
-          file.print(temp[i].log_IMU_ax);
+          file.print(temp[i].log_delta_count2);
           file.print(",");
-          file.print(temp[i].log_IMU_ay);
+          file.print(temp[i].log_total_count2);
           file.print(",");
-          file.print(temp[i].log_IMU_az);
+          file.print(temp[i].log_delta_count3);
           file.print(",");
-          file.print(temp[i].log_IMU_gx);
+          file.print(temp[i].log_total_count3);
           file.print(",");
-          file.print(temp[i].log_IMU_gy);
-          file.print(",");
-          file.print(temp[i].log_IMU_gz);
-          file.print(",");
-          file.print(temp[i].log_IMU_pitch);
-          file.print(",");
-          file.print(temp[i].log_IMU_roll);
-          file.print(",");
-          file.print(temp[i].log_IMU_yaw);
-          file.print(",");
-          file.println(temp[i].log_IMU_temp);
+          file.println(temp[i].log_distance1);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_ax);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_ay);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_az);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_gx);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_gy);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_gz);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_pitch);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_roll);
+          //file.print(",");
+          //file.print(temp[i].log_IMU_yaw);
+          //file.print(",");
+          //file.println(temp[i].log_IMU_temp);
       }
       file.close();
     }
@@ -349,10 +389,12 @@ void timerInterrupt(void) {
 
     seq = millis() - seq_buff;
 
-    M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
-    M5.IMU.getAccelData(&accX,&accY,&accZ);
-    M5.IMU.getAhrsData(&pitch,&roll,&yaw);
-    M5.IMU.getTempData(&temp);
+    //M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
+    //M5.IMU.getAccelData(&accX,&accY,&accZ);
+    //M5.IMU.getAhrsData(&pitch,&roll,&yaw);
+    //M5.IMU.getTempData(&temp);
+
+    newDistance1 = distanceContinuous(&distance1);
 
     if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
@@ -362,16 +404,21 @@ void timerInterrupt(void) {
       rp->log_power = power;
       rp->log_delta_count1 = delta_count1;
       rp->log_total_count1 = total_count1;
-      rp->log_IMU_ax = accX;
-      rp->log_IMU_ay = accY;
-      rp->log_IMU_az = accZ;
-      rp->log_IMU_gx = gyroX;
-      rp->log_IMU_gy = gyroY;
-      rp->log_IMU_gz = gyroZ;
-      rp->log_IMU_pitch = pitch;
-      rp->log_IMU_roll = roll;
-      rp->log_IMU_yaw = yaw;
-      rp->log_IMU_temp = temp;
+      rp->log_delta_count2 = delta_count2;
+      rp->log_total_count2 = total_count2;
+      rp->log_delta_count3 = delta_count3;
+      rp->log_total_count3 = total_count3;
+      rp->log_distance1 = distance1;
+      //rp->log_IMU_ax = accX;
+      //rp->log_IMU_ay = accY;
+      //rp->log_IMU_az = accZ;
+      //rp->log_IMU_gx = gyroX;
+      //rp->log_IMU_gy = gyroY;
+      //rp->log_IMU_gz = gyroZ;
+      //rp->log_IMU_pitch = pitch;
+      //rp->log_IMU_roll = roll;
+      //rp->log_IMU_yaw = yaw;
+      //rp->log_IMU_temp = temp;
       if (++bufferIndex[writeBank] >= BufferRecords) {
           writeBank = !writeBank;
       }
@@ -388,8 +435,7 @@ void timerInterrupt(void) {
         if( digitalRead(rssiPin) ) {
           duration = 70;
         }
-      }
-      
+      }      
       break;
     case 3:
       break;
@@ -504,6 +550,29 @@ void initEncoder(void) {
   pcnt_counter_resume(PCNT_UNIT_2);             // Start Count
 }
 
+// Lidar
+//------------------------------------------------------------------//
+uint8_t distanceContinuous(uint16_t * distance1)
+{
+    newDistance1 = 0;
+
+    // Check on busyFlag to indicate if device is idle
+    // (meaning = it finished the previously triggered measurement)
+    if (LidarLite1.getBusyFlag() == 0)
+    {
+        // Trigger the next range measurement
+        LidarLite1.takeRange();
+
+        // Read new distance data from device registers
+        *distance1 = LidarLite1.readDistance();
+
+        // Report to calling function that we have new data
+        newDistance1 = 1;
+    }
+
+    return newDistance1;
+}
+
 // Initialize PSRAM
 //------------------------------------------------------------------//
 void initPSRAM(void) {
@@ -558,6 +627,8 @@ void initLCD(void) {
   M5.Lcd.setCursor(10, 130);
   M5.Lcd.printf("Motor Power :"); 
   M5.Lcd.setCursor(10, 160);
+  M5.Lcd.printf("Distance1 :"); 
+  M5.Lcd.setCursor(10, 190);
   M5.Lcd.printf("RSSI :"); 
 
 }
@@ -580,6 +651,8 @@ void lcdDisplay(void) {
   M5.Lcd.setCursor(220, 130);
   M5.Lcd.printf("%3d", power);
   M5.Lcd.setCursor(220, 160);
+  M5.Lcd.printf("%3d", distance1);
+  M5.Lcd.setCursor(220, 190);
   M5.Lcd.printf("%3d", duration);
 
 }
