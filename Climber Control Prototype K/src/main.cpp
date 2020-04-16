@@ -40,6 +40,8 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
+#define STATUS_DISPLAY_TIME 1000
+
 #define BufferRecords 64                    // 1Cycle Buffer Records 
 
 
@@ -88,11 +90,20 @@ LIDARLite_v3HP LidarLite1;
 uint16_t distance1;
 uint8_t  newDistance1 = 0;
 
+// XBee
+char     tx_pattern = 1;
+char     rx_pattern = 0;
+int      rx_val = 0;
+char     xbee_rx_buffer[16];
+int      xbee_index = 0;
+unsigned long display_buff;
+
 // Main
 unsigned char pattern = 0;
 unsigned long seq;
 unsigned long seq_buff;
 unsigned long time_buff = 0;
+bool  lcd_flag = false;
 
 // MPU
 float accX = 0.0F;
@@ -164,6 +175,9 @@ void buttonAction(void);
 void initLCD(void);
 void lcdDisplay(void);
 uint8_t distanceContinuous(uint16_t * distance1);
+uint8_t distanceFast(uint16_t * distance1);
+void xbee_rx(void);
+void xbee_tx(void);
 
 //Setup
 //------------------------------------------------------------------//
@@ -171,7 +185,9 @@ void setup() {
 
   M5.begin();
 
-  Serial2.begin(57600);
+  //dacWrite(25, 0); 
+
+  Serial2.begin(115200);
 
   // Initialize Timer Interrupt
   timer = timerBegin(0, 80, true);
@@ -194,7 +210,6 @@ void setup() {
   // Initialize IIC
   Wire.begin();
   Wire.setClock(400000);
-
 
   // Initialize MPU
   //M5.IMU.Init();
@@ -311,6 +326,10 @@ void taskDisplay(void *pvParameters){
   file.close();
 
   while(1){    
+
+    xbee_rx();
+    xbee_tx();
+    
     int readBank = !writeBank;
     if (bufferIndex[readBank] >= BufferRecords) {
       static RecordType temp[BufferRecords];
@@ -385,17 +404,16 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_2);  
     total_count3 += delta_count3;
 
-    Serial2.printf("Time %d\n",millis());
-
     seq = millis() - seq_buff;
+    
+    distanceContinuous(&distance1);
 
     //M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
     //M5.IMU.getAccelData(&accX,&accY,&accZ);
     //M5.IMU.getAhrsData(&pitch,&roll,&yaw);
     //M5.IMU.getTempData(&temp);
-
-    newDistance1 = distanceContinuous(&distance1);
-
+    
+    
     if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
       RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
       rp->log_time = millis();
@@ -425,6 +443,7 @@ void timerInterrupt(void) {
     }
     
     iTimer10++;
+    // 50ms timerinterrupt
     switch (iTimer10) {
     case 1:
       if(pattern == 11 && (power < 100)) power++;
@@ -433,25 +452,29 @@ void timerInterrupt(void) {
       duration = pulseIn(rssiPin, HIGH, 100);
       if( duration == 0 ) {
         if( digitalRead(rssiPin) ) {
-          duration = 70;
+          duration = 60;
         }
       }      
       break;
-    case 3:
+    case 3:      
+      if( tx_pattern == 101 ) {
+        Serial2.printf("%d, ",millis());
+        Serial2.printf("%d, ",seq);
+        Serial2.printf("%d, ",pattern);
+        Serial2.printf("%d, ",power);
+        Serial2.printf("%d, ",delta_count1);
+        Serial2.printf("%d, ",total_count1);
+        Serial2.printf("%d, ",delta_count2);
+        Serial2.printf("%d, ",total_count2);
+        Serial2.printf("%d, ",delta_count3);
+        Serial2.printf("%d, ",total_count3);
+        Serial2.printf("%d\n",distance1);
+      }
       break;
-    case 4:
+    case 4:      
       break;
     case 5:
-      break;
-    case 6:
-      break;
-    case 7:
-      break;
-    case 8:
-      break;
-    case 9:
-      break;
-    case 10:
+      lcd_flag = true;
       iTimer10 = 0;
       break;
     }
@@ -573,6 +596,111 @@ uint8_t distanceContinuous(uint16_t * distance1)
     return newDistance1;
 }
 
+uint8_t distanceFast(uint16_t * distance1)
+{
+    // 1. Wait for busyFlag to indicate device is idle. This must be
+    //    done before triggering a range measurement.
+    LidarLite1.waitForBusy();
+
+    // 2. Trigger range measurement.
+    LidarLite1.takeRange();
+
+    // 3. Read previous distance data from device registers.
+    //    After starting a measurement we can immediately read previous
+    //    distance measurement while the current range acquisition is
+    //    ongoing. This distance data is valid until the next
+    //    measurement finishes. The I2C transaction finishes before new
+    //    distance measurement data is acquired.
+    *distance1 = LidarLite1.readDistance();
+
+    return 1;
+}
+
+// XBee RX
+//------------------------------------------------------------------//
+void xbee_rx(void) {
+
+  while (Serial2.available()) {
+    xbee_rx_buffer[xbee_index] = Serial2.read();
+    Serial2.write(xbee_rx_buffer[xbee_index]);
+
+    if( xbee_rx_buffer[xbee_index] == '/' ) {
+      Serial2.print("\n\n"); 
+      if( tx_pattern == 0 ) {
+        rx_pattern = atoi(xbee_rx_buffer);
+      } else {
+        rx_val = atof(xbee_rx_buffer);
+      }
+      xbee_index = 0;
+      
+      switch ( rx_pattern ) {
+          
+      case 0:
+        tx_pattern = 1;
+        break;
+        
+      case 11:
+        rx_pattern = 0;
+        pattern = 11;
+        tx_pattern = 11;
+        display_buff = millis();
+        break;
+      }
+      
+    } else if( xbee_rx_buffer[xbee_index] == 'T' || xbee_rx_buffer[xbee_index] == 't' ) {
+      rx_pattern = 0;
+      tx_pattern = 101;
+    } else {
+        xbee_index++;
+    }
+
+  }
+}
+
+// XBee TX
+//------------------------------------------------------------------//
+void xbee_tx(void) {
+
+  switch ( tx_pattern ) {   
+    case 0:
+      break;
+
+    case 1:
+      Serial2.print("\n\n\n\n\n\n");
+      Serial2.print(" Climber Controller (M5Stack version) "
+                      "Test Program Ver1.20\n");
+      Serial2.print("\n");
+      Serial2.print(" Climber control\n");
+      Serial2.print(" 11 : Start Seqence\n");
+      Serial2.print("\n");
+      Serial2.print(" 20 : Sequence Control\n");
+      Serial2.print(" 21 : Start/Stop Hovering\n");
+      Serial2.print(" 22 : Start Extruding\n");
+      Serial2.print(" 23 : Start Winding\n");
+      Serial2.print(" 24 : Pause\n");
+      Serial2.print(" T : Telemetry\n");
+      
+      Serial2.print("\n");
+      Serial2.print(" Please enter 11 to 35  ");
+      
+      tx_pattern = 0;
+      break;
+
+    case 2:
+      if( millis() - display_buff > STATUS_DISPLAY_TIME ) {
+        tx_pattern = 1;
+      }    
+      break;
+
+    case 11:
+      Serial2.print(" Start Sequence...\n");
+      tx_pattern = 2;
+      break;
+  }
+
+}
+
+
 // Initialize PSRAM
 //------------------------------------------------------------------//
 void initPSRAM(void) {
@@ -638,22 +766,25 @@ void initLCD(void) {
 //------------------------------------------------------------------//
 void lcdDisplay(void) {
 
-  // Refresh Display
-  M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setCursor(220, 10);
-  M5.Lcd.printf("%6d", pattern);  
-  M5.Lcd.setCursor(220, 40);
-  M5.Lcd.printf("%6d", total_count1); 
-  M5.Lcd.setCursor(220, 70);
-  M5.Lcd.printf("%6d", total_count2); 
-  M5.Lcd.setCursor(220, 100);
-  M5.Lcd.printf("%6d", total_count3);
-  M5.Lcd.setCursor(220, 130);
-  M5.Lcd.printf("%3d", power);
-  M5.Lcd.setCursor(220, 160);
-  M5.Lcd.printf("%3d", distance1);
-  M5.Lcd.setCursor(220, 190);
-  M5.Lcd.printf("%3d", duration);
+  if( lcd_flag ) {
+    // Refresh Display
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(220, 10);
+    M5.Lcd.printf("%6d", pattern);  
+    M5.Lcd.setCursor(220, 40);
+    M5.Lcd.printf("%6d", total_count1); 
+    M5.Lcd.setCursor(220, 70);
+    M5.Lcd.printf("%6d", total_count2); 
+    M5.Lcd.setCursor(220, 100);
+    M5.Lcd.printf("%6d", total_count3);
+    M5.Lcd.setCursor(220, 130);
+    M5.Lcd.printf("%3d", power);
+    M5.Lcd.setCursor(220, 160);
+    M5.Lcd.printf("%3d", distance1);
+    M5.Lcd.setCursor(220, 190);
+    M5.Lcd.printf("%3d", duration);
+    lcd_flag = false;
+  }
 
 }
 
