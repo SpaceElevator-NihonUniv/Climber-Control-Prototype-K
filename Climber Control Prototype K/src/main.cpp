@@ -137,11 +137,14 @@ unsigned long display_buff;
 
 // Main
 unsigned char pattern = 0;
-unsigned long seq;
-unsigned long seq_buff;
+long seq;
+long seq_buff;
+long seq_comp = 0;
 unsigned long time_buff = 0;
 bool  lcd_flag = false;
 unsigned int start_cnt = 0;
+unsigned char starting_delay = 15;
+unsigned char starting_display[11];
 
 // MPU
 float accX = 0.0F;
@@ -216,6 +219,7 @@ uint8_t distanceContinuous(uint16_t * distance1);
 uint8_t distanceFast(uint16_t * distance1);
 void xbee_rx(void);
 void xbee_tx(void);
+void start_sequence(void);
 
 //Setup
 //------------------------------------------------------------------//
@@ -321,8 +325,20 @@ void loop() {
       time_buff = 0;
       seq_buff = millis();
       pattern = 0;
+      initLCD();  
       break;
     }    
+    break;
+
+  // Start Sequence
+  case 201:
+    start_sequence();
+    break;
+
+  case 202:
+    seq_buff = millis();
+    M5.Lcd.clear();
+    pattern = 11;
     break;
 
   }
@@ -576,9 +592,13 @@ void xbee_rx(void) {
         
       case 11:
         rx_pattern = 0;
-        pattern = 11;
         tx_pattern = 11;
         display_buff = millis();
+        seq_buff = millis();
+        total_count1 = 0;
+        total_count2 = 0;
+        total_count3 = 0;
+        pattern = 201;
         break;
       }
       
@@ -801,7 +821,14 @@ void buttonAction(void){
   }
   if (M5.BtnA.pressedFor(3000)) {
     seq_buff = millis();
-    pattern = 11;
+    total_count1 = 0;
+    total_count2 = 0;
+    total_count3 = 0;
+    M5.Lcd.clear();
+    for(int i=0;i<11;i++) {
+      starting_display[i] = 1;
+    }    
+    pattern = 201;
   }
 }
 
@@ -1001,4 +1028,73 @@ void initEncoder(void) {
   pcnt_counter_resume(PCNT_UNIT_0);             // Start Count
   pcnt_counter_resume(PCNT_UNIT_1);             // Start Count
   pcnt_counter_resume(PCNT_UNIT_2);             // Start Count
+}
+
+//Start Sequence
+//------------------------------------------------------------------//
+void start_sequence(void) {
+  char start_pattern;  
+
+  if( seq/1000 > seq_comp ) {
+    start_pattern = starting_delay - seq/1000; 
+    seq_comp = seq/1000;
+
+    switch (start_pattern) {
+      case 10:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-10.jpg", 0, 0);
+        break;
+      case 9:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-9.jpg", 0, 0);
+        break;
+      case 8:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-8.jpg", 0, 0);
+        break;
+      case 7:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-7.jpg", 0, 0);
+        break;
+      case 6:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-6.jpg", 0, 0);
+        break;
+      case 5:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-5.jpg", 0, 0);
+        break;
+      case 4:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-4.jpg", 0, 0);
+        break;
+      case 3:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-3.jpg", 0, 0);
+        break;
+      case 2:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-2.jpg", 0, 0);
+        break;
+      case 1:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-1.jpg", 0, 0);
+        break;
+      case 0:
+        M5.Lcd.clear();
+        M5.Lcd.drawJpgFile(SD, "/icon/count-0.jpg", 0, 0);
+        pattern = 202;
+        break;
+
+      default:
+        M5.Lcd.setTextColor(WHITE, BLACK);
+        M5.Lcd.setCursor(20, 20);
+        M5.Lcd.setTextSize(4);
+        M5.Lcd.printf("UPCOMING:");  
+        M5.Lcd.setCursor(20, 100);
+        M5.Lcd.setTextSize(7);
+        M5.Lcd.printf("LIFTOFF"); 
+        break;
+    }    
+  }
 }
