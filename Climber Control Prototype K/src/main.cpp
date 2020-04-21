@@ -14,6 +14,8 @@
 
 #include <stdint.h>
 #include <M5Stack.h>
+#include <Avatar.h>
+#include <faces/DogFace.h>
 #include <Servo.h>
 #include <EEPROM.h>
 #include <LIDARLite_v3HP.h>
@@ -33,10 +35,10 @@
 
 #define PULSE1_INPUT_PIN 35                 // Rotaly Encoder Phase A
 #define PULSE1_CTRL_PIN  36                 // Rotaly Encoder Phase B
-#define PULSE2_INPUT_PIN 25                 // Rotaly Encoder Phase A
-#define PULSE2_CTRL_PIN  26                 // Rotaly Encoder Phase B
-#define PULSE3_INPUT_PIN 2                  // Rotaly Encoder Phase A
-#define PULSE3_CTRL_PIN  5                  // Rotaly Encoder Phase B
+#define PULSE2_INPUT_PIN 2                  // Rotaly Encoder Phase A
+#define PULSE2_CTRL_PIN  5                  // Rotaly Encoder Phase B
+#define PULSE3_INPUT_PIN 25                 // Rotaly Encoder Phase A
+#define PULSE3_CTRL_PIN  26                 // Rotaly Encoder Phase B
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
@@ -50,11 +52,42 @@
 
 TaskHandle_t task_handl;
 
+// Avatar
+using namespace m5avatar;
+Avatar avatar;
+
 // Timer
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 volatile int interruptCounter;
 int iTimer10;
+
+// Avatar
+Face* faces[2];
+const int facesSize = sizeof(faces) / sizeof(Face*);
+int faceIdx = 0;
+
+const Expression expressions[] = {
+  Expression::Angry,
+  Expression::Sleepy,
+  Expression::Happy,
+  Expression::Sad,
+  Expression::Doubt,
+  Expression::Neutral
+};
+const int expressionsSize = sizeof(expressions) / sizeof(Expression);
+int idx = 0;
+
+ColorPalette* cps[4];
+const int cpsSize = sizeof(cps) / sizeof(ColorPalette*);
+int cpsIdx = 0;
+
+bool isShowingQR = false;
+
+bool avatar_flag = false;
+int avatar_cnt = 0;
+
+char lcd_pattern = 0;
 
 // PSRAM
 // platformio.ini Add ↓
@@ -90,6 +123,10 @@ LIDARLite_v3HP LidarLite1;
 uint16_t distance1;
 uint8_t  newDistance1 = 0;
 
+LIDARLite_v3HP LidarLite2;
+uint16_t distance2;
+uint8_t  newDistance2 = 0;
+
 // XBee
 char     tx_pattern = 1;
 char     rx_pattern = 0;
@@ -104,6 +141,7 @@ unsigned long seq;
 unsigned long seq_buff;
 unsigned long time_buff = 0;
 bool  lcd_flag = false;
+unsigned int start_cnt = 0;
 
 // MPU
 float accX = 0.0F;
@@ -122,7 +160,7 @@ float temp = 0.0F;
 
 // Battery
 unsigned char battery_status;
-unsigned char battery_persent;
+char battery_persent;
 
 // RSSI
 const int rssiPin = 34;
@@ -165,7 +203,7 @@ static volatile int bufferIndex[2] = {0, 0};
 
 //Prototype
 //------------------------------------------------------------------//
-uint8_t getBatteryGauge(void);
+int8_t getBatteryLevel(void);
 void taskDisplay(void *pvParameters);
 void IRAM_ATTR onTimer(void);
 void timerInterrupt(void);
@@ -205,8 +243,7 @@ void setup() {
   xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
 
   M5.Lcd.setTextSize(2);
-  initLCD();
-
+  
   // Initialize IIC
   Wire.begin();
   Wire.setClock(400000);
@@ -228,6 +265,25 @@ void setup() {
   LidarLite1.configure(0); 
   delay(100);
 
+  faces[0] = avatar.getFace();
+  faces[1] = new DogFace();
+
+  cps[0] = new ColorPalette();
+  cps[1] = new ColorPalette();
+  cps[0]->set(COLOR_PRIMARY, WHITE);
+  cps[0]->set(COLOR_BACKGROUND, BLACK);
+  cps[1]->set(COLOR_PRIMARY, DARKGREY);
+  cps[1]->set(COLOR_BACKGROUND, WHITE);
+
+  avatar.init();
+  avatar.setExpression(expressions[2]);
+  delay(2000);
+  avatar.stop();  
+  avatar.setExpression(expressions[5]);
+  delay(100);  
+  M5.Lcd.clear();  
+  initLCD();  
+  
 }
 
 //Main #1
@@ -243,12 +299,15 @@ void loop() {
     buttonAction();
     break;  
 
+  case 1:
+    buttonAction();
+    break;
+
   case 11:
-    lcdDisplay();
     kosmik1.write(power);
-    if( total_count1 >= 100000 || total_count1 <= -100000 ) {
+    if( total_count2 >= 100000 || total_count2 <= -100000 ) {
       power = 0;
-      total_count1 = 0; 
+      total_count2 = 0; 
       time_buff = millis();
       seq_buff = millis();
       pattern = 101;
@@ -257,7 +316,6 @@ void loop() {
     break;
 
   case 101:
-    lcdDisplay();
     kosmik1.write(0);
     if( millis() - time_buff >= 5000 ) {
       time_buff = 0;
@@ -393,7 +451,8 @@ void timerInterrupt(void) {
     portENTER_CRITICAL(&timerMux);
     interruptCounter--;
     portEXIT_CRITICAL(&timerMux);
-    
+
+   
     pcnt_get_counter_value(PCNT_UNIT_0, &delta_count1);
     pcnt_counter_clear(PCNT_UNIT_0);  
     total_count1 += delta_count1;
@@ -407,6 +466,7 @@ void timerInterrupt(void) {
     seq = millis() - seq_buff;
     
     distanceContinuous(&distance1);
+
 
     //M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
     //M5.IMU.getAccelData(&accX,&accY,&accZ);
@@ -474,11 +534,381 @@ void timerInterrupt(void) {
     case 4:      
       break;
     case 5:
+      battery_persent = getBatteryLevel();
+      if( pattern == 0 && !avatar_flag ) {
+        avatar_cnt++;
+        if( avatar_cnt > 600 ) {
+          avatar_flag = true;
+          avatar.start();
+          avatar.setColorPalette(*cps[1]);
+          pattern = 1;
+        }
+      }
       lcd_flag = true;
       iTimer10 = 0;
       break;
     }
   }
+}
+
+// XBee RX
+//------------------------------------------------------------------//
+void xbee_rx(void) {
+
+  while (Serial2.available()) {
+    xbee_rx_buffer[xbee_index] = Serial2.read();
+    Serial2.write(xbee_rx_buffer[xbee_index]);
+
+    if( xbee_rx_buffer[xbee_index] == '/' ) {
+      Serial2.print("\n\n"); 
+      if( tx_pattern == 0 ) {
+        rx_pattern = atoi(xbee_rx_buffer);
+      } else {
+        rx_val = atof(xbee_rx_buffer);
+      }
+      xbee_index = 0;
+      
+      switch ( rx_pattern ) {
+          
+      case 0:
+        tx_pattern = 1;
+        break;
+        
+      case 11:
+        rx_pattern = 0;
+        pattern = 11;
+        tx_pattern = 11;
+        display_buff = millis();
+        break;
+      }
+      
+    } else if( xbee_rx_buffer[xbee_index] == 'T' || xbee_rx_buffer[xbee_index] == 't' ) {
+      rx_pattern = 0;
+      tx_pattern = 101;
+    } else {
+        xbee_index++;
+    }
+
+  }
+}
+
+// XBee TX
+//------------------------------------------------------------------//
+void xbee_tx(void) {
+
+  switch ( tx_pattern ) {   
+    case 0:
+      break;
+
+    case 1:
+      Serial2.print("\n\n\n\n\n\n");
+      Serial2.print(" Climber Controller (M5Stack version) "
+                      "Test Program Ver1.20\n");
+      Serial2.print("\n");
+      Serial2.print(" Climber control\n");
+      Serial2.print(" 11 : Start Seqence\n");
+      Serial2.print("\n");
+      Serial2.print(" 20 : Sequence Control\n");
+      Serial2.print(" 21 : Start/Stop Hovering\n");
+      Serial2.print(" 22 : Start Extruding\n");
+      Serial2.print(" 23 : Start Winding\n");
+      Serial2.print(" 24 : Pause\n");
+      Serial2.print(" T : Telemetry\n");
+      
+      Serial2.print("\n");
+      Serial2.print(" Please enter 11 to 35  ");
+      
+      tx_pattern = 0;
+      break;
+
+    case 2:
+      if( millis() - display_buff > STATUS_DISPLAY_TIME ) {
+        tx_pattern = 1;
+      }    
+      break;
+
+    case 11:
+      Serial2.print(" Start Sequence...\n");
+      tx_pattern = 2;
+      break;
+  }
+}
+
+
+// Initialize LCD
+//------------------------------------------------------------------//
+void initLCD(void) {
+
+  M5.Lcd.clear();   
+  switch (lcd_pattern) {
+  case 0:         
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(20, 10);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.printf("Operating T+:");  
+    M5.Lcd.setCursor(20, 60);
+    M5.Lcd.setTextSize(4);
+    M5.Lcd.printf("Case");  
+    M5.Lcd.setCursor(100, 100);
+    M5.Lcd.setTextSize(15);
+    M5.Lcd.printf("%3d",pattern);  
+    M5.Lcd.setCursor(40, 200);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.printf("ALL SYSTEMS ARE REDAY");  
+    break;
+  case 1:
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 10);
+    M5.Lcd.printf("Total Counter 1:"); 
+    M5.Lcd.setCursor(10, 40);
+    M5.Lcd.printf("Total Counter 2:"); 
+    M5.Lcd.setCursor(10, 70);
+    M5.Lcd.printf("Total Counter 3:"); 
+    M5.Lcd.setCursor(10, 100);
+    M5.Lcd.printf("Distance1 :"); 
+    M5.Lcd.setCursor(10, 130);
+    M5.Lcd.printf("Distance2 :"); 
+  break;
+  case 2:   
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setCursor(10, 10);
+    M5.Lcd.printf("Climbing Height:"); 
+    M5.Lcd.setCursor(10, 40);
+    M5.Lcd.printf("Climbing Velocity:"); 
+    M5.Lcd.setCursor(10, 70);
+    M5.Lcd.printf("Climbing Accel:"); 
+    M5.Lcd.setCursor(10, 100);
+    M5.Lcd.printf("Decending Velocity:"); 
+    M5.Lcd.setCursor(10, 130);
+    M5.Lcd.printf("Starting delay:");   
+    M5.Lcd.setCursor(10, 160);
+    M5.Lcd.printf("Interval Time:");   
+    break;
+  }
+}
+
+
+// LCD Display
+//------------------------------------------------------------------//
+void lcdDisplay(void) {
+
+  if( lcd_flag ) {
+    // Refresh Display
+    switch (lcd_pattern) {
+    case 0:     
+      M5.Lcd.setCursor(190, 10);
+      M5.Lcd.setTextSize(2);
+      M5.Lcd.printf("%4d", millis()/1000);  
+      if( battery_persent == 100) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-100.jpg", 290, 0);
+      } else if( battery_persent == 75) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-75.jpg", 290, 0);
+      } else if( battery_persent == 50) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-50.jpg", 290, 0);
+      } else if( battery_persent == 25) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-25.jpg", 290, 0);
+      } else {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-0.jpg", 290, 0);
+      }
+      if( duration > 55 ) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-100.jpg", 250, 0);
+      } else if( duration > 48 ) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-75.jpg", 250, 0);
+      } else if( duration > 41 ) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-50.jpg", 250, 0);
+      } else if( duration > 34 ) {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-25.jpg", 250, 0);
+      } else {
+        M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-0.jpg", 250, 0);
+      }
+      lcd_flag = false; 
+      break;
+    case 1:
+      M5.Lcd.setTextColor(WHITE, BLACK);
+      M5.Lcd.setCursor(220, 10);
+      M5.Lcd.printf("%6d", total_count1); 
+      M5.Lcd.setCursor(220, 40);
+      M5.Lcd.printf("%6d", total_count2); 
+      M5.Lcd.setCursor(220, 70);
+      M5.Lcd.printf("%6d", total_count3);
+      M5.Lcd.setCursor(220, 100);
+      M5.Lcd.printf("%3d", distance1);
+      M5.Lcd.setCursor(220, 130);
+      M5.Lcd.printf("%3d", distance2);
+      lcd_flag = false;
+      break;
+    case 2:
+      lcd_flag = false;
+      break;
+    }
+  }
+}
+
+// Button Action
+//------------------------------------------------------------------//
+void buttonAction(void){
+  M5.update();
+  if (M5.BtnA.wasPressed()) {
+    if( pattern == 0 ) {
+      //seq_buff = millis();
+      //pattern = 11;
+      lcd_pattern = 0;
+      avatar_cnt = 0;      
+      initLCD();
+    } else if ( pattern == 1 ) {
+      avatar.stop();
+      delay(100);
+      avatar_flag = false;
+      avatar.setColorPalette(*cps[0]);
+      M5.Lcd.clear();   
+      pattern = 0;   
+      lcd_pattern = 0;
+      initLCD();
+      avatar_cnt = 0;      
+    } 
+  } else if (M5.BtnB.wasPressed()) {
+    if( pattern == 0 ) {
+      lcd_pattern = 1;
+      avatar_cnt = 0;
+      initLCD();
+    } else if ( pattern == 1 ) {
+      avatar.stop();
+      delay(100);
+      avatar_flag = false;
+      avatar.setColorPalette(*cps[0]);
+      M5.Lcd.clear();  
+      pattern = 0;    
+      lcd_pattern = 1;
+      initLCD();
+      avatar_cnt = 0;      
+    } 
+  } else if (M5.BtnC.wasPressed()) {
+    if( pattern == 0 ) {
+      lcd_pattern = 2;
+      avatar_cnt = 0;
+      initLCD();
+    } else if ( pattern == 1 ) {
+      avatar.stop();
+      delay(100);
+      avatar_flag = false;
+      avatar.setColorPalette(*cps[0]);
+      M5.Lcd.clear();     
+      pattern = 0; 
+      lcd_pattern = 2;
+      initLCD();
+      avatar_cnt = 0;      
+    } 
+  }
+  if (M5.BtnA.pressedFor(3000)) {
+    seq_buff = millis();
+    pattern = 11;
+  }
+}
+
+// IRAM
+//------------------------------------------------------------------//
+void IRAM_ATTR onTimer() {
+  portENTER_CRITICAL_ISR(&timerMux);
+  interruptCounter=1;
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+
+// Battery Gauge
+//------------------------------------------------------------------//
+int8_t getBatteryLevel() {
+  Wire.beginTransmission(0x75);
+  Wire.write(0x78);
+  if (Wire.endTransmission(false) == 0
+   && Wire.requestFrom(0x75, 1)) {
+    switch (Wire.read() & 0xF0) {
+    case 0xE0: return 25;
+    case 0xC0: return 50;
+    case 0x80: return 75;
+    case 0x00: return 100;
+    default: return 0;
+    }
+  }
+  return -1;
+}
+
+// Initialize PSRAM
+//------------------------------------------------------------------//
+void initPSRAM(void) {
+
+  // 4194252byte >> 800ms
+  // 1024byte    >> 834us
+  // 64byte      >> 642us
+  
+  Serial.printf("Internal Total heap %d, internal Free Heap %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
+  Serial.printf("SPIRam Total heap %d, SPIRam Free Heap %d\n", ESP.getPsramSize(), ESP.getFreePsram());
+  Serial.printf("Flash Size %d, Flash Speed %d\n", ESP.getFlashChipSize(), ESP.getFlashChipSpeed());
+  Serial.printf("ChipRevision %d, Cpu Freq %d, SDK Version %s\n", ESP.getChipRevision(), ESP.getCpuFreqMHz(), ESP.getSdkVersion());
+  Serial.println("");
+
+  // SPRAM 
+  memMax= ESP.getFreePsram();
+  p = (char*) ps_calloc( memMax , sizeof(char) );
+
+
+  // Memory Check
+  int i = 0;
+  while ( i < memMax ) {
+    p[i] = (char)i;
+    if ( p[i] != (char)i ) {
+      Serial.printf("write error at %d\n", i);
+      i--;
+      break;
+    }
+    i++;
+  }
+
+  Serial.printf("%d bytes check Ok\n", i);
+  
+  free(p); // Clear
+
+}
+
+// Lidar
+//------------------------------------------------------------------//
+uint8_t distanceContinuous(uint16_t * distance1)
+{
+    newDistance1 = 0;
+
+    // Check on busyFlag to indicate if device is idle
+    // (meaning = it finished the previously triggered measurement)
+    if (LidarLite1.getBusyFlag() == 0)
+    {
+        // Trigger the next range measurement
+        LidarLite1.takeRange();
+
+        // Read new distance data from device registers
+        *distance1 = LidarLite1.readDistance();
+
+        // Report to calling function that we have new data
+        newDistance1 = 1;
+    }
+
+    return newDistance1;
+}
+
+uint8_t distanceFast(uint16_t * distance1)
+{
+    // 1. Wait for busyFlag to indicate device is idle. This must be
+    //    done before triggering a range measurement.
+    LidarLite1.waitForBusy();
+
+    // 2. Trigger range measurement.
+    LidarLite1.takeRange();
+
+    // 3. Read previous distance data from device registers.
+    //    After starting a measurement we can immediately read previous
+    //    distance measurement while the current range acquisition is
+    //    ongoing. This distance data is valid until the next
+    //    measurement finishes. The I2C transaction finishes before new
+    //    distance measurement data is acquired.
+    *distance1 = LidarLite1.readDistance();
+
+    return 1;
 }
 
 // Initialize Encoder
@@ -571,253 +1001,4 @@ void initEncoder(void) {
   pcnt_counter_resume(PCNT_UNIT_0);             // Start Count
   pcnt_counter_resume(PCNT_UNIT_1);             // Start Count
   pcnt_counter_resume(PCNT_UNIT_2);             // Start Count
-}
-
-// Lidar
-//------------------------------------------------------------------//
-uint8_t distanceContinuous(uint16_t * distance1)
-{
-    newDistance1 = 0;
-
-    // Check on busyFlag to indicate if device is idle
-    // (meaning = it finished the previously triggered measurement)
-    if (LidarLite1.getBusyFlag() == 0)
-    {
-        // Trigger the next range measurement
-        LidarLite1.takeRange();
-
-        // Read new distance data from device registers
-        *distance1 = LidarLite1.readDistance();
-
-        // Report to calling function that we have new data
-        newDistance1 = 1;
-    }
-
-    return newDistance1;
-}
-
-uint8_t distanceFast(uint16_t * distance1)
-{
-    // 1. Wait for busyFlag to indicate device is idle. This must be
-    //    done before triggering a range measurement.
-    LidarLite1.waitForBusy();
-
-    // 2. Trigger range measurement.
-    LidarLite1.takeRange();
-
-    // 3. Read previous distance data from device registers.
-    //    After starting a measurement we can immediately read previous
-    //    distance measurement while the current range acquisition is
-    //    ongoing. This distance data is valid until the next
-    //    measurement finishes. The I2C transaction finishes before new
-    //    distance measurement data is acquired.
-    *distance1 = LidarLite1.readDistance();
-
-    return 1;
-}
-
-// XBee RX
-//------------------------------------------------------------------//
-void xbee_rx(void) {
-
-  while (Serial2.available()) {
-    xbee_rx_buffer[xbee_index] = Serial2.read();
-    Serial2.write(xbee_rx_buffer[xbee_index]);
-
-    if( xbee_rx_buffer[xbee_index] == '/' ) {
-      Serial2.print("\n\n"); 
-      if( tx_pattern == 0 ) {
-        rx_pattern = atoi(xbee_rx_buffer);
-      } else {
-        rx_val = atof(xbee_rx_buffer);
-      }
-      xbee_index = 0;
-      
-      switch ( rx_pattern ) {
-          
-      case 0:
-        tx_pattern = 1;
-        break;
-        
-      case 11:
-        rx_pattern = 0;
-        pattern = 11;
-        tx_pattern = 11;
-        display_buff = millis();
-        break;
-      }
-      
-    } else if( xbee_rx_buffer[xbee_index] == 'T' || xbee_rx_buffer[xbee_index] == 't' ) {
-      rx_pattern = 0;
-      tx_pattern = 101;
-    } else {
-        xbee_index++;
-    }
-
-  }
-}
-
-// XBee TX
-//------------------------------------------------------------------//
-void xbee_tx(void) {
-
-  switch ( tx_pattern ) {   
-    case 0:
-      break;
-
-    case 1:
-      Serial2.print("\n\n\n\n\n\n");
-      Serial2.print(" Climber Controller (M5Stack version) "
-                      "Test Program Ver1.20\n");
-      Serial2.print("\n");
-      Serial2.print(" Climber control\n");
-      Serial2.print(" 11 : Start Seqence\n");
-      Serial2.print("\n");
-      Serial2.print(" 20 : Sequence Control\n");
-      Serial2.print(" 21 : Start/Stop Hovering\n");
-      Serial2.print(" 22 : Start Extruding\n");
-      Serial2.print(" 23 : Start Winding\n");
-      Serial2.print(" 24 : Pause\n");
-      Serial2.print(" T : Telemetry\n");
-      
-      Serial2.print("\n");
-      Serial2.print(" Please enter 11 to 35  ");
-      
-      tx_pattern = 0;
-      break;
-
-    case 2:
-      if( millis() - display_buff > STATUS_DISPLAY_TIME ) {
-        tx_pattern = 1;
-      }    
-      break;
-
-    case 11:
-      Serial2.print(" Start Sequence...\n");
-      tx_pattern = 2;
-      break;
-  }
-
-}
-
-
-// Initialize PSRAM
-//------------------------------------------------------------------//
-void initPSRAM(void) {
-
-  // 4194252byte >> 800ms
-  // 1024byte    >> 834us
-  // 64byte      >> 642us
-  
-  Serial.printf("Internal Total heap %d, internal Free Heap %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
-  Serial.printf("SPIRam Total heap %d, SPIRam Free Heap %d\n", ESP.getPsramSize(), ESP.getFreePsram());
-  Serial.printf("Flash Size %d, Flash Speed %d\n", ESP.getFlashChipSize(), ESP.getFlashChipSpeed());
-  Serial.printf("ChipRevision %d, Cpu Freq %d, SDK Version %s\n", ESP.getChipRevision(), ESP.getCpuFreqMHz(), ESP.getSdkVersion());
-  Serial.println("");
-
-  // SPRAM 
-  memMax= ESP.getFreePsram();
-  p = (char*) ps_calloc( memMax , sizeof(char) );
-
-
-  // Memory Check
-  int i = 0;
-  while ( i < memMax ) {
-    p[i] = (char)i;
-    if ( p[i] != (char)i ) {
-      Serial.printf("write error at %d\n", i);
-      i--;
-      break;
-    }
-    i++;
-  }
-
-  Serial.printf("%d bytes check Ok\n", i);
-  
-  free(p); // Clear
-
-}
-
-// Initialize LCD
-//------------------------------------------------------------------//
-void initLCD(void) {
-
-  // Refresh Display
-  M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setCursor(10, 10);
-  M5.Lcd.printf("Pattern:");  
-  M5.Lcd.setCursor(10, 40);
-  M5.Lcd.printf("Total Counter 1:"); 
-  M5.Lcd.setCursor(10, 70);
-  M5.Lcd.printf("Total Counter 2:"); 
-  M5.Lcd.setCursor(10, 100);
-  M5.Lcd.printf("Total Counter 3:"); 
-  M5.Lcd.setCursor(10, 130);
-  M5.Lcd.printf("Motor Power :"); 
-  M5.Lcd.setCursor(10, 160);
-  M5.Lcd.printf("Distance1 :"); 
-  M5.Lcd.setCursor(10, 190);
-  M5.Lcd.printf("RSSI :"); 
-
-}
-
-
-// LCD Display
-//------------------------------------------------------------------//
-void lcdDisplay(void) {
-
-  if( lcd_flag ) {
-    // Refresh Display
-    M5.Lcd.setTextColor(WHITE, BLACK);
-    M5.Lcd.setCursor(220, 10);
-    M5.Lcd.printf("%6d", pattern);  
-    M5.Lcd.setCursor(220, 40);
-    M5.Lcd.printf("%6d", total_count1); 
-    M5.Lcd.setCursor(220, 70);
-    M5.Lcd.printf("%6d", total_count2); 
-    M5.Lcd.setCursor(220, 100);
-    M5.Lcd.printf("%6d", total_count3);
-    M5.Lcd.setCursor(220, 130);
-    M5.Lcd.printf("%3d", power);
-    M5.Lcd.setCursor(220, 160);
-    M5.Lcd.printf("%3d", distance1);
-    M5.Lcd.setCursor(220, 190);
-    M5.Lcd.printf("%3d", duration);
-    lcd_flag = false;
-  }
-
-}
-
-// Button Action
-//------------------------------------------------------------------//
-void buttonAction(void){
-  M5.update();
-  if (M5.BtnA.wasPressed()) {
-    if( pattern == 0 ) {
-      seq_buff = millis();
-      pattern = 11;
-    }
-  } else if (M5.BtnB.wasPressed()) {
-  } else if (M5.BtnC.wasPressed()) {
-  }
-}
-
-// IRAM
-//------------------------------------------------------------------//
-void IRAM_ATTR onTimer() {
-  portENTER_CRITICAL_ISR(&timerMux);
-  interruptCounter=1;
-  portEXIT_CRITICAL_ISR(&timerMux);
-}
-
-// Battery Gauge
-//------------------------------------------------------------------//
-uint8_t getBatteryGauge() {
-  Wire.beginTransmission(0x75);
-  Wire.write(0x78);
-  Wire.endTransmission(false);
-  if(Wire.requestFrom(0x75, 1)) {
-    return Wire.read();
-  }
-  return 0xff;
 }
