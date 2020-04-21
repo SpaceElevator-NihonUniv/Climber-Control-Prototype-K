@@ -534,31 +534,35 @@ void timerInterrupt(void) {
       break;
     case 3:      
       if( tx_pattern == 101 ) {
-        Serial2.printf("%d, ",millis());
-        Serial2.printf("%d, ",seq);
-        Serial2.printf("%d, ",pattern);
-        Serial2.printf("%d, ",power);
-        Serial2.printf("%d, ",delta_count1);
-        Serial2.printf("%d, ",total_count1);
-        Serial2.printf("%d, ",delta_count2);
-        Serial2.printf("%d, ",total_count2);
-        Serial2.printf("%d, ",delta_count3);
-        Serial2.printf("%d, ",total_count3);
-        Serial2.printf("%d\n",distance1);
+        Serial2.printf("%3d, ",millis()/1000);
+        Serial2.printf("%3d, ",seq/1000);
+        Serial2.printf("%3d, ",pattern);
+        Serial2.printf("%3d, ",power);
+        Serial2.printf("%5d, ",delta_count1);
+        Serial2.printf("%7d, ",total_count1);
+        Serial2.printf("%5d, ",delta_count2);
+        Serial2.printf("%7d, ",total_count2);
+        Serial2.printf("%5d, ",delta_count3);
+        Serial2.printf("%7d, ",total_count3);
+        Serial2.printf("%5d, ",distance1);
+        Serial2.printf("%5d, ",distance2);
+        Serial2.printf("%2d\n",duration);
       }
       break;
     case 4:      
       break;
     case 5:
       battery_persent = getBatteryLevel();
-      if( pattern == 0 && !avatar_flag ) {
+      if( pattern == 0 && !avatar_flag && duration == 0 ) {
         avatar_cnt++;
-        if( avatar_cnt > 600 ) {
+        if( avatar_cnt > 200 ) {
           avatar_flag = true;
           avatar.start();
           avatar.setColorPalette(*cps[1]);
           pattern = 1;
         }
+      } else {
+        avatar_cnt = 0;
       }
       lcd_flag = true;
       iTimer10 = 0;
@@ -590,14 +594,15 @@ void xbee_rx(void) {
         tx_pattern = 1;
         break;
         
-      case 11:
+      case 11:      
         rx_pattern = 0;
         tx_pattern = 11;
-        display_buff = millis();
         seq_buff = millis();
         total_count1 = 0;
         total_count2 = 0;
         total_count3 = 0;
+        M5.Lcd.clear();
+        tx_pattern = 101;
         pattern = 201;
         break;
       }
@@ -608,7 +613,7 @@ void xbee_rx(void) {
     } else {
         xbee_index++;
     }
-
+    avatar_cnt = 0;
   }
 }
 
@@ -625,14 +630,13 @@ void xbee_tx(void) {
       Serial2.print(" Climber Controller (M5Stack version) "
                       "Test Program Ver1.20\n");
       Serial2.print("\n");
-      Serial2.print(" Climber control\n");
       Serial2.print(" 11 : Start Seqence\n");
       Serial2.print("\n");
       Serial2.print(" 20 : Sequence Control\n");
       Serial2.print(" 21 : Start/Stop Hovering\n");
       Serial2.print(" 22 : Start Extruding\n");
       Serial2.print(" 23 : Start Winding\n");
-      Serial2.print(" 24 : Pause\n");
+      Serial2.print(" 24 : Pause\n\n");
       Serial2.print(" T : Telemetry\n");
       
       Serial2.print("\n");
@@ -825,9 +829,7 @@ void buttonAction(void){
     total_count2 = 0;
     total_count3 = 0;
     M5.Lcd.clear();
-    for(int i=0;i<11;i++) {
-      starting_display[i] = 1;
-    }    
+    tx_pattern = 101;
     pattern = 201;
   }
 }
