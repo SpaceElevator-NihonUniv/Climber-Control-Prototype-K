@@ -42,14 +42,11 @@
 #define PCNT_H_LIM_VAL  10000               // Counter Limit H
 #define PCNT_L_LIM_VAL -10000               // Counter Limit L 
 
-#define STATUS_DISPLAY_TIME 1000
-
 #define BufferRecords 64                    // 1Cycle Buffer Records 
 
 
 //Global
 //------------------------------------------------------------------//
-
 TaskHandle_t task_handl;
 
 // Avatar
@@ -87,7 +84,8 @@ bool isShowingQR = false;
 bool avatar_flag = false;
 int avatar_cnt = 0;
 
-char lcd_pattern = 0;
+unsigned char lcd_pattern = 0;
+unsigned char lcd_cnt = 0;
 
 // PSRAM
 // platformio.ini Add ↓
@@ -133,7 +131,6 @@ char     rx_pattern = 0;
 int      rx_val = 0;
 char     xbee_rx_buffer[16];
 int      xbee_index = 0;
-unsigned long display_buff;
 
 // Main
 unsigned char pattern = 0;
@@ -144,7 +141,6 @@ unsigned long time_buff = 0;
 bool  lcd_flag = false;
 unsigned int start_cnt = 0;
 unsigned char starting_delay = 15;
-unsigned char starting_display[11];
 
 // MPU
 float accX = 0.0F;
@@ -550,9 +546,9 @@ void timerInterrupt(void) {
       }
       break;
     case 4:      
-      break;
-    case 5:
       battery_persent = getBatteryLevel();
+      break;
+    case 5:      
       if( pattern == 0 && !avatar_flag && duration == 0 ) {
         avatar_cnt++;
         if( avatar_cnt > 200 ) {
@@ -564,7 +560,15 @@ void timerInterrupt(void) {
       } else {
         avatar_cnt = 0;
       }
-      lcd_flag = true;
+      if(lcd_pattern>1) {
+        lcd_flag = true;
+      } else {
+        lcd_cnt++;
+        if(lcd_cnt>5) {
+          lcd_flag = true;
+          lcd_cnt = 0;
+        }
+      }      
       iTimer10 = 0;
       break;
     }
@@ -595,14 +599,14 @@ void xbee_rx(void) {
         break;
         
       case 11:      
+        while(lcd_flag);
         rx_pattern = 0;
-        tx_pattern = 11;
         seq_buff = millis();
         total_count1 = 0;
         total_count2 = 0;
         total_count3 = 0;
         M5.Lcd.clear();
-        tx_pattern = 101;
+        tx_pattern = 11;
         pattern = 201;
         break;
       }
@@ -615,6 +619,7 @@ void xbee_rx(void) {
     }
     avatar_cnt = 0;
   }
+
 }
 
 // XBee TX
@@ -645,15 +650,9 @@ void xbee_tx(void) {
       tx_pattern = 0;
       break;
 
-    case 2:
-      if( millis() - display_buff > STATUS_DISPLAY_TIME ) {
-        tx_pattern = 1;
-      }    
-      break;
-
     case 11:
       Serial2.print(" Start Sequence...\n");
-      tx_pattern = 2;
+      tx_pattern = 101;
       break;
   }
 }
@@ -829,7 +828,7 @@ void buttonAction(void){
     total_count2 = 0;
     total_count3 = 0;
     M5.Lcd.clear();
-    tx_pattern = 101;
+    tx_pattern = 11;
     pattern = 201;
   }
 }
