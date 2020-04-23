@@ -619,6 +619,8 @@ void xbee_rx(void) {
       case 21:
         if( rx_val == 1 ) {          
           seq_buff = millis();
+          seq_comp = 0;
+          power = 0;
           total_count1 = 0;
           total_count2 = 0;
           total_count3 = 0;
@@ -716,6 +718,16 @@ void xbee_rx(void) {
       rx_pattern = 0;
       tx_pattern = 101;
       Serial2.printf("\n");
+    } else if( xbee_rx_buffer[xbee_index] == ' ') {
+      pattern = 0;
+      Serial2.printf("\n");
+      Serial2.printf(" Emargency Stop Enable \n");
+      Serial2.printf(" Return Case 0 \n");
+      rx_pattern = 0;
+      tx_pattern = 1;
+      //M5.Lcd.clear();  
+      //initLCD();
+      Serial2.printf("\n");
     } else {
         xbee_index++;
     }
@@ -812,7 +824,7 @@ void xbee_tx(void) {
       break;
 
     case 37:
-      Serial2.printf(" Sleep Flag  [%4ds]\n", sleep_flag);
+      Serial2.printf(" Sleep Flag  [%4d]\n", sleep_flag);
       Serial2.printf(" Please enter 0 or 1 -> ");
       tx_pattern = 2;
       break;
@@ -1008,11 +1020,14 @@ void buttonAction(void){
   }
   if (M5.BtnA.pressedFor(3000)) {
     seq_buff = millis();
+    seq_comp = 0;
+    power = 0;
     total_count1 = 0;
     total_count2 = 0;
     total_count3 = 0;
     M5.Lcd.clear();
-    tx_pattern = 11;
+    Serial2.printf("\n");
+    tx_pattern = 101;
     pattern = 201;
   }
 }
