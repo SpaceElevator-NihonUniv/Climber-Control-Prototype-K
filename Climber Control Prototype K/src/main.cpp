@@ -140,13 +140,7 @@ long seq_comp = 0;
 unsigned long time_buff = 0;
 bool  lcd_flag = false;
 unsigned int start_cnt = 0;
-unsigned int climbing_height = 15;
-unsigned char climbing_velocity = 100;
-unsigned char climbing_accel = 20;
-unsigned char decending_velocity = 5;
 unsigned char starting_delay = 15;
-unsigned char interval_time = 10;
-bool sleep_flag = true;
 
 // MPU
 float accX = 0.0F;
@@ -222,8 +216,6 @@ uint8_t distanceFast(uint16_t * distance1);
 void xbee_rx(void);
 void xbee_tx(void);
 void start_sequence(void);
-void eeprom_write(void);
-void eeprom_read(void);
 
 //Setup
 //------------------------------------------------------------------//
@@ -234,9 +226,6 @@ void setup() {
   //dacWrite(25, 0); 
 
   Serial2.begin(115200);
-  EEPROM.begin(128);
-  delay(10);
-  eeprom_read();
 
   // Initialize Timer Interrupt
   timer = timerBegin(0, 80, true);
@@ -274,27 +263,25 @@ void setup() {
   seq_buff = millis();  
 
   LidarLite1.configure(0); 
-  delay(100); 
+  delay(100);
 
-  if( sleep_flag ) {
-    faces[0] = avatar.getFace();
-    faces[1] = new DogFace();
+  faces[0] = avatar.getFace();
+  faces[1] = new DogFace();
 
-    cps[0] = new ColorPalette();
-    cps[1] = new ColorPalette();
-    cps[0]->set(COLOR_PRIMARY, WHITE);
-    cps[0]->set(COLOR_BACKGROUND, BLACK);
-    cps[1]->set(COLOR_PRIMARY, DARKGREY);
-    cps[1]->set(COLOR_BACKGROUND, WHITE);
+  cps[0] = new ColorPalette();
+  cps[1] = new ColorPalette();
+  cps[0]->set(COLOR_PRIMARY, WHITE);
+  cps[0]->set(COLOR_BACKGROUND, BLACK);
+  cps[1]->set(COLOR_PRIMARY, DARKGREY);
+  cps[1]->set(COLOR_BACKGROUND, WHITE);
 
-    avatar.init();
-    avatar.setExpression(expressions[2]);
-    delay(2000);
-    avatar.stop();  
-    avatar.setExpression(expressions[5]);
-    delay(100);  
-    M5.Lcd.clear(); 
-  } 
+  avatar.init();
+  avatar.setExpression(expressions[2]);
+  delay(2000);
+  avatar.stop();  
+  avatar.setExpression(expressions[5]);
+  delay(100);  
+  M5.Lcd.clear();  
   initLCD();  
   
 }
@@ -562,20 +549,18 @@ void timerInterrupt(void) {
       battery_persent = getBatteryLevel();
       break;
     case 5:      
-      if( sleep_flag ) {
-        if( pattern == 0 && !avatar_flag && duration == 0 ) {
-          avatar_cnt++;
-          if( avatar_cnt > 600 ) {
-            avatar_flag = true;
-            avatar.start();
-            avatar.setColorPalette(*cps[1]);
-            pattern = 1;
-          }
-        } else {
-          avatar_cnt = 0;
+      if( pattern == 0 && !avatar_flag && duration == 0 ) {
+        avatar_cnt++;
+        if( avatar_cnt > 200 ) {
+          avatar_flag = true;
+          avatar.start();
+          avatar.setColorPalette(*cps[1]);
+          pattern = 1;
         }
+      } else {
+        avatar_cnt = 0;
       }
-      if(lcd_pattern>=1) {
+      if(lcd_pattern>1) {
         lcd_flag = true;
       } else {
         lcd_cnt++;
@@ -602,17 +587,19 @@ void xbee_rx(void) {
       Serial2.print("\n\n"); 
       if( tx_pattern == 0 ) {
         rx_pattern = atoi(xbee_rx_buffer);
-      } else if( tx_pattern == 2 ) {
+      } else {
         rx_val = atof(xbee_rx_buffer);
       }
       xbee_index = 0;
       
-      switch ( rx_pattern ) {          
+      switch ( rx_pattern ) {
+          
       case 0:
         tx_pattern = 1;
         break;
         
       case 11:      
+<<<<<<< HEAD
         tx_pattern = 11;
         rx_pattern = 21;
         break;
@@ -708,15 +695,24 @@ void xbee_rx(void) {
         sleep_flag = rx_val;
         eeprom_write();
         tx_pattern = 1;
+=======
+        while(lcd_flag);
+>>>>>>> parent of eb2c977... Update main.cpp
         rx_pattern = 0;
+        seq_buff = millis();
+        total_count1 = 0;
+        total_count2 = 0;
+        total_count3 = 0;
+        M5.Lcd.clear();
+        tx_pattern = 11;
+        pattern = 201;
         break;
-
-
-      }      
+      }
       
     } else if( xbee_rx_buffer[xbee_index] == 'T' || xbee_rx_buffer[xbee_index] == 't' ) {
       rx_pattern = 0;
       tx_pattern = 101;
+<<<<<<< HEAD
       Serial2.printf("\n");
     } else if( xbee_rx_buffer[xbee_index] == ' ') {
       pattern = 0;
@@ -728,6 +724,8 @@ void xbee_rx(void) {
       //M5.Lcd.clear();  
       //initLCD();
       Serial2.printf("\n");
+=======
+>>>>>>> parent of eb2c977... Update main.cpp
     } else {
         xbee_index++;
     }
@@ -741,38 +739,31 @@ void xbee_rx(void) {
 void xbee_tx(void) {
 
   switch ( tx_pattern ) {   
-    // Waiting Command
     case 0:
       break;
 
     case 1:
-      Serial2.printf("\n\n\n\n\n\n");
-      Serial2.printf(" Climber Controller (M5Stack version) "
+      Serial2.print("\n\n\n\n\n\n");
+      Serial2.print(" Climber Controller (M5Stack version) "
                       "Test Program Ver1.20\n");
-      Serial2.printf("\n");
-      Serial2.printf(" 11 : Start Seqence\n");
-      Serial2.printf("\n");
-      Serial2.printf(" 31 : Climbing Height    [%4d]\n", climbing_height);
-      Serial2.printf(" 32 : Climbing Velocity  [%4d]\n", climbing_velocity);
-      Serial2.printf(" 33 : Climbing Accel     [%4d]\n", climbing_accel);
-      Serial2.printf(" 34 : Decending Velocity [%4d]\n", decending_velocity);
-      Serial2.printf(" 35 : Starting delay     [%4d]\n", starting_delay);
-      Serial2.printf(" 36 : Interval Time      [%4d]\n", interval_time);
-      Serial2.printf(" 37 : Sleep Flag         [%4d]\n", sleep_flag);
-      Serial2.printf("\n");
-      Serial2.printf(" T : Telemetry\n");
+      Serial2.print("\n");
+      Serial2.print(" 11 : Start Seqence\n");
+      Serial2.print("\n");
+      Serial2.print(" 20 : Sequence Control\n");
+      Serial2.print(" 21 : Start/Stop Hovering\n");
+      Serial2.print(" 22 : Start Extruding\n");
+      Serial2.print(" 23 : Start Winding\n");
+      Serial2.print(" 24 : Pause\n\n");
+      Serial2.print(" T : Telemetry\n");
       
-      Serial2.printf("\n");
-      Serial2.printf(" Please enter 11 to 35  ");
+      Serial2.print("\n");
+      Serial2.print(" Please enter 11 to 35  ");
       
       tx_pattern = 0;
       break;
 
-    // Waiting Value
-    case 2:
-      break;
-
     case 11:
+<<<<<<< HEAD
       Serial2.printf("\n Check Current Parameters\n");
       Serial2.printf("\n");
       Serial2.printf(" Climbing Height    [%4d]\n", climbing_height);
@@ -831,8 +822,11 @@ void xbee_tx(void) {
 
     // Telemetry Mode
     case 101:
+=======
+      Serial2.print(" Start Sequence...\n");
+      tx_pattern = 101;
+>>>>>>> parent of eb2c977... Update main.cpp
       break;
-
   }
 }
 
@@ -885,8 +879,6 @@ void initLCD(void) {
     M5.Lcd.printf("Starting delay:");   
     M5.Lcd.setCursor(10, 160);
     M5.Lcd.printf("Interval Time:");   
-    M5.Lcd.setCursor(10, 190);
-    M5.Lcd.printf("Sleep Flag:");   
     break;
   }
 }
@@ -896,7 +888,7 @@ void initLCD(void) {
 //------------------------------------------------------------------//
 void lcdDisplay(void) {
 
-  if( lcd_flag ) {    
+  if( lcd_flag ) {
     // Refresh Display
     switch (lcd_pattern) {
     case 0:     
@@ -930,33 +922,18 @@ void lcdDisplay(void) {
     case 1:
       M5.Lcd.setTextColor(WHITE, BLACK);
       M5.Lcd.setCursor(220, 10);
-      M5.Lcd.printf("%7d", total_count1); 
+      M5.Lcd.printf("%6d", total_count1); 
       M5.Lcd.setCursor(220, 40);
-      M5.Lcd.printf("%7d", total_count2); 
+      M5.Lcd.printf("%6d", total_count2); 
       M5.Lcd.setCursor(220, 70);
-      M5.Lcd.printf("%7d", total_count3);
+      M5.Lcd.printf("%6d", total_count3);
       M5.Lcd.setCursor(220, 100);
-      M5.Lcd.printf("%7d", distance1);
+      M5.Lcd.printf("%3d", distance1);
       M5.Lcd.setCursor(220, 130);
-      M5.Lcd.printf("%7d", distance2);
+      M5.Lcd.printf("%3d", distance2);
       lcd_flag = false;
       break;
     case 2:
-      M5.Lcd.setTextColor(WHITE, BLACK);
-      M5.Lcd.setCursor(220, 10);
-      M5.Lcd.printf("%7d", climbing_height); 
-      M5.Lcd.setCursor(220, 40);
-      M5.Lcd.printf("%7d", climbing_velocity); 
-      M5.Lcd.setCursor(220, 70);
-      M5.Lcd.printf("%7d", climbing_accel);
-      M5.Lcd.setCursor(220, 100);
-      M5.Lcd.printf("%7d", decending_velocity);
-      M5.Lcd.setCursor(220, 130);
-      M5.Lcd.printf("%7d", starting_delay);
-      M5.Lcd.setCursor(220, 160);
-      M5.Lcd.printf("%7d", interval_time);
-      M5.Lcd.setCursor(220, 190);
-      M5.Lcd.printf("%7d", sleep_flag);
       lcd_flag = false;
       break;
     }
@@ -1030,37 +1007,6 @@ void buttonAction(void){
     tx_pattern = 101;
     pattern = 201;
   }
-}
-
-// EEPROM Write
-//------------------------------------------------------------------// 
-void eeprom_write(void) {
-  EEPROM.write(0, sleep_flag);
-  EEPROM.write(1, (climbing_height & 0xFF));
-  EEPROM.write(2, (climbing_height>>8 & 0xFF));
-  EEPROM.write(3, (climbing_height>>16 & 0xFF));
-  EEPROM.write(4, (climbing_height>>24 & 0xFF));
-  EEPROM.write(5, climbing_velocity);
-  EEPROM.write(6, climbing_accel);
-  EEPROM.write(7, decending_velocity);
-  EEPROM.write(8, starting_delay);
-  EEPROM.write(9, interval_time);
-  delay(10);
-  EEPROM.commit();
-  delay(10);
-}
-
-// EEPROM Read
-//------------------------------------------------------------------// 
-void eeprom_read(void) {
-    sleep_flag = EEPROM.read(0);
-    climbing_height = EEPROM.read(1) + (EEPROM.read(2)<<8) + (EEPROM.read(3)<<16) + (EEPROM.read(4)<<24);
-    climbing_velocity = EEPROM.read(5);
-    climbing_accel = EEPROM.read(6);
-    decending_velocity = EEPROM.read(7);
-    starting_delay = EEPROM.read(8);
-    interval_time = EEPROM.read(9);
-    delay(10);
 }
 
 // IRAM
