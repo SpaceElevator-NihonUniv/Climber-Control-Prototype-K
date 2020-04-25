@@ -20,6 +20,7 @@
 #include <EEPROM.h>
 #include <LIDARLite_v3HP.h>
 #include "driver/pcnt.h"
+#include <utility/MahonyAHRS.h>
 
 
 //Define
@@ -57,8 +58,8 @@ Avatar avatar;
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 volatile int interruptCounter;
-int iTimer10;
-int iTimer50;
+int iTimer10 = 0;
+int iTimer50 = 0;
 
 // Avatar
 Face* faces[2];
@@ -237,7 +238,6 @@ void eeprom_read(void);
 void setup() {
 
   M5.begin(1, 1, 0, 1);
-  M5.Power.begin();
 
   //dacWrite(25, 0); 
 
@@ -507,51 +507,53 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_2);  
     total_count3 += delta_count3;
 
-    seq = millis() - seq_buff;   
+    seq = millis() - seq_buff; 
 
-    digitalWrite(3, led_flag);
-    led_flag = !led_flag;
+    digitalWrite(3, led_flag);  
+    led_flag = !led_flag;         
     
     iTimer10++;
     // 10ms timerinterrupt
     switch (iTimer10) {
-    case 1:
-      //if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
-      //  RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
-      //  rp->log_time = millis();
-      //  rp->log_seq = seq;
-      //  rp->log_pattern = pattern;
-      //  rp->log_power = power;
-      //  rp->log_delta_count1 = delta_count1;
-      //  rp->log_total_count1 = total_count1;
-      //  rp->log_delta_count2 = delta_count2;
-      //  rp->log_total_count2 = total_count2;
-      //  rp->log_delta_count3 = delta_count3;
-      //  rp->log_total_count3 = total_count3;
-      //  rp->log_distance1 = distance1;
-      //  rp->log_IMU_ax = accX;
-      //  rp->log_IMU_ay = accY;
-      //  rp->log_IMU_az = accZ;
-      //  rp->log_IMU_gx = gyroX;
-      //  rp->log_IMU_gy = gyroY;
-      //  rp->log_IMU_gz = gyroZ;
-      //  rp->log_IMU_pitch = pitch;
-      //  rp->log_IMU_roll = roll;
-      //  rp->log_IMU_yaw = yaw;
-      //  rp->log_IMU_temp = temp;
-      //  if (++bufferIndex[writeBank] >= BufferRecords) {
-      //      writeBank = !writeBank;
-      //  }
-      //}
+    case 1:      
+      if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
+        RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
+        rp->log_time = millis();
+        rp->log_seq = seq;
+        rp->log_pattern = pattern;
+        rp->log_power = power;
+        rp->log_delta_count1 = delta_count1;
+        rp->log_total_count1 = total_count1;
+        rp->log_delta_count2 = delta_count2;
+        rp->log_total_count2 = total_count2;
+        rp->log_delta_count3 = delta_count3;
+        rp->log_total_count3 = total_count3;
+        rp->log_distance1 = distance1;
+        rp->log_IMU_ax = accX;
+        rp->log_IMU_ay = accY;
+        rp->log_IMU_az = accZ;
+        rp->log_IMU_gx = gyroX;
+        rp->log_IMU_gy = gyroY;
+        rp->log_IMU_gz = gyroZ;
+        rp->log_IMU_pitch = pitch;
+        rp->log_IMU_roll = roll;
+        rp->log_IMU_yaw = yaw;
+        rp->log_IMU_temp = temp;
+        if (++bufferIndex[writeBank] >= BufferRecords) {
+            writeBank = !writeBank;
+        }
+      }
       break;
     case 2:
       distanceContinuous(&distance1);
       break;
-    case 3:
+    case 3:      
       break;
-    case 4: 
+    case 4:
+      M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);      
       break;
     case 5:
+      M5.IMU.getAccelData(&accX,&accY,&accZ);
       break;
     case 6:
       M5.IMU.getAhrsData(&pitch,&roll,&yaw);
@@ -600,8 +602,8 @@ void timerInterrupt(void) {
         Serial2.printf("\n");
       }
       break;
-    case 40:      
-      battery_persent = getBatteryLevel();
+    case 40:         
+      battery_persent = getBatteryLevel(); 
       break;
     case 50:      
       if( sleep_flag ) {
