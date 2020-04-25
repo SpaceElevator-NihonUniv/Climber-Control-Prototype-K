@@ -24,7 +24,7 @@
 
 //Define
 //------------------------------------------------------------------//
-#define TIMER_INTERRUPT 10                  // Timer Interrupt Period
+#define TIMER_INTERRUPT 1                   // Timer Interrupt Period
 
 #define FAST_I2C
                                             // LDEC CH 0-2,6-7 not use
@@ -58,6 +58,7 @@ hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 volatile int interruptCounter;
 int iTimer10;
+int iTimer50;
 
 // Avatar
 Face* faces[2];
@@ -115,6 +116,10 @@ static const int turnigy1Pin = 12;
 Servo turnigy1;
 static const int turnigy2Pin = 13;
 Servo turnigy2;
+
+// LED 
+static const int ledPin = 1;
+bool led_flag = false;
 
 // LIDAR
 LIDARLite_v3HP LidarLite1;
@@ -192,16 +197,16 @@ typedef struct {
     int16_t log_delta_count3;
     long log_total_count3;
     uint16_t log_distance1;
-    //float log_IMU_ax;
-    //float log_IMU_ay;
-    //float log_IMU_az;
-    //float log_IMU_gx;
-    //float log_IMU_gy;
-    //float log_IMU_gz;
-    //float log_IMU_pitch;
-    //float log_IMU_roll;
-    //float log_IMU_yaw;
-    //float log_IMU_temp;
+    float log_IMU_ax;
+    float log_IMU_ay;
+    float log_IMU_az;
+    float log_IMU_gx;
+    float log_IMU_gy;
+    float log_IMU_gz;
+    float log_IMU_pitch;
+    float log_IMU_roll;
+    float log_IMU_yaw;
+    float log_IMU_temp;
 } RecordType;
 
 static RecordType buffer[2][BufferRecords];
@@ -231,7 +236,8 @@ void eeprom_read(void);
 //------------------------------------------------------------------//
 void setup() {
 
-  M5.begin();
+  M5.begin(1, 1, 0, 1);
+  M5.Power.begin();
 
   //dacWrite(25, 0); 
 
@@ -249,9 +255,10 @@ void setup() {
   initEncoder();
   //initPSRAM();  
 
-  pinMode(rssiPin, INPUT);
+  pinMode(rssiPin, INPUT);  
   pinMode(21, INPUT_PULLUP);
   pinMode(22, INPUT_PULLUP); 
+  pinMode(3, OUTPUT);
 
   M5.Lcd.setTextSize(2);
   
@@ -260,7 +267,7 @@ void setup() {
   Wire.setClock(400000);
 
   // Initialize MPU
-  //M5.IMU.Init();
+  M5.IMU.Init();
   
   kosmik1.attach(kosmik1Pin, KOSMIK1_LEDC_CHANNEL, 0, 100, 1100, 1940);
   kosmik1.write(0);
@@ -306,7 +313,7 @@ void setup() {
 void loop() {
 
   timerInterrupt();
-
+  
   switch (pattern) {
   case 0:    
     lcdDisplay();
@@ -398,27 +405,27 @@ void taskDisplay(void *pvParameters){
   file.print(",");
   file.print("Total Count3");
   file.print(",");
-  file.println("Distance1");
-  //file.print(",");
-  //file.print("AX");
-  //file.print(",");
-  //file.print("AY");
-  //file.print(",");
-  //file.print("AZ");
-  //file.print(",");
-  //file.print("GX");
-  //file.print(",");
-  //file.print("GY");
-  //file.print(",");
-  //file.print("GZ"); 
-  //file.print(","); 
-  //file.print("Pitch");
-  //file.print(",");
-  //file.print("Roll");
-  //file.print(",");
-  //file.print("Yaw");
-  //file.print(",");
-  //file.println("Temp");  
+  file.print("Distance1");
+  file.print(",");
+  file.print("AX");
+  file.print(",");
+  file.print("AY");
+  file.print(",");
+  file.print("AZ");
+  file.print(",");
+  file.print("GX");
+  file.print(",");
+  file.print("GY");
+  file.print(",");
+  file.print("GZ"); 
+  file.print(","); 
+  file.print("Pitch");
+  file.print(",");
+  file.print("Roll");
+  file.print(",");
+  file.print("Yaw");
+  file.print(",");
+  file.println("Temp");  
   file.close();
 
   while(1){    
@@ -454,27 +461,27 @@ void taskDisplay(void *pvParameters){
           file.print(",");
           file.print(temp[i].log_total_count3);
           file.print(",");
-          file.println(temp[i].log_distance1);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_ax);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_ay);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_az);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_gx);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_gy);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_gz);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_pitch);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_roll);
-          //file.print(",");
-          //file.print(temp[i].log_IMU_yaw);
-          //file.print(",");
-          //file.println(temp[i].log_IMU_temp);
+          file.print(temp[i].log_distance1);
+          file.print(",");
+          file.print(temp[i].log_IMU_ax);
+          file.print(",");
+          file.print(temp[i].log_IMU_ay);
+          file.print(",");
+          file.print(temp[i].log_IMU_az);
+          file.print(",");
+          file.print(temp[i].log_IMU_gx);
+          file.print(",");
+          file.print(temp[i].log_IMU_gy);
+          file.print(",");
+          file.print(temp[i].log_IMU_gz);
+          file.print(",");
+          file.print(temp[i].log_IMU_pitch);
+          file.print(",");
+          file.print(temp[i].log_IMU_roll);
+          file.print(",");
+          file.print(temp[i].log_IMU_yaw);
+          file.print(",");
+          file.println(temp[i].log_IMU_temp);
       }
       file.close();
     }
@@ -489,7 +496,6 @@ void timerInterrupt(void) {
     portENTER_CRITICAL(&timerMux);
     interruptCounter--;
     portEXIT_CRITICAL(&timerMux);
-
    
     pcnt_get_counter_value(PCNT_UNIT_0, &delta_count1);
     pcnt_counter_clear(PCNT_UNIT_0);  
@@ -501,52 +507,74 @@ void timerInterrupt(void) {
     pcnt_counter_clear(PCNT_UNIT_2);  
     total_count3 += delta_count3;
 
-    seq = millis() - seq_buff;
-    
-    distanceContinuous(&distance1);
+    seq = millis() - seq_buff;   
 
-
-    //M5.IMU.getGyroData(&gyroX,&gyroY,&gyroZ);
-    //M5.IMU.getAccelData(&accX,&accY,&accZ);
-    //M5.IMU.getAhrsData(&pitch,&roll,&yaw);
-    //M5.IMU.getTempData(&temp);
-    
-    
-    if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
-      RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
-      rp->log_time = millis();
-      rp->log_seq = seq;
-      rp->log_pattern = pattern;
-      rp->log_power = power;
-      rp->log_delta_count1 = delta_count1;
-      rp->log_total_count1 = total_count1;
-      rp->log_delta_count2 = delta_count2;
-      rp->log_total_count2 = total_count2;
-      rp->log_delta_count3 = delta_count3;
-      rp->log_total_count3 = total_count3;
-      rp->log_distance1 = distance1;
-      //rp->log_IMU_ax = accX;
-      //rp->log_IMU_ay = accY;
-      //rp->log_IMU_az = accZ;
-      //rp->log_IMU_gx = gyroX;
-      //rp->log_IMU_gy = gyroY;
-      //rp->log_IMU_gz = gyroZ;
-      //rp->log_IMU_pitch = pitch;
-      //rp->log_IMU_roll = roll;
-      //rp->log_IMU_yaw = yaw;
-      //rp->log_IMU_temp = temp;
-      if (++bufferIndex[writeBank] >= BufferRecords) {
-          writeBank = !writeBank;
-      }
-    }
+    digitalWrite(3, led_flag);
+    led_flag = !led_flag;
     
     iTimer10++;
-    // 50ms timerinterrupt
+    // 10ms timerinterrupt
     switch (iTimer10) {
     case 1:
-      if(pattern == 11 && (power < 100)) power++;
+      //if (pattern >= 11 && bufferIndex[writeBank] < BufferRecords) {
+      //  RecordType* rp = &buffer[writeBank][bufferIndex[writeBank]];
+      //  rp->log_time = millis();
+      //  rp->log_seq = seq;
+      //  rp->log_pattern = pattern;
+      //  rp->log_power = power;
+      //  rp->log_delta_count1 = delta_count1;
+      //  rp->log_total_count1 = total_count1;
+      //  rp->log_delta_count2 = delta_count2;
+      //  rp->log_total_count2 = total_count2;
+      //  rp->log_delta_count3 = delta_count3;
+      //  rp->log_total_count3 = total_count3;
+      //  rp->log_distance1 = distance1;
+      //  rp->log_IMU_ax = accX;
+      //  rp->log_IMU_ay = accY;
+      //  rp->log_IMU_az = accZ;
+      //  rp->log_IMU_gx = gyroX;
+      //  rp->log_IMU_gy = gyroY;
+      //  rp->log_IMU_gz = gyroZ;
+      //  rp->log_IMU_pitch = pitch;
+      //  rp->log_IMU_roll = roll;
+      //  rp->log_IMU_yaw = yaw;
+      //  rp->log_IMU_temp = temp;
+      //  if (++bufferIndex[writeBank] >= BufferRecords) {
+      //      writeBank = !writeBank;
+      //  }
+      //}
       break;
     case 2:
+      distanceContinuous(&distance1);
+      break;
+    case 3:
+      break;
+    case 4: 
+      break;
+    case 5:
+      break;
+    case 6:
+      M5.IMU.getAhrsData(&pitch,&roll,&yaw);
+      break;
+    case 7:
+      M5.IMU.getTempData(&temp);
+      break;
+    case 8:
+      break;
+    case 9:
+      break;
+    case 10:      
+      iTimer10 = 0;      
+      break;
+    }    
+    
+    iTimer50++;
+    // 50ms timerinterrupt
+    switch (iTimer50) {
+    case 10:
+      if(pattern == 11 && (power < 100)) power++;
+      break;
+    case 20:
       duration = pulseIn(rssiPin, HIGH, 100);
       if( duration == 0 ) {
         if( digitalRead(rssiPin) ) {
@@ -554,7 +582,7 @@ void timerInterrupt(void) {
         }
       }      
       break;
-    case 3:      
+    case 30:     
       if( tx_pattern == 101 ) {
         Serial2.printf("%3d, ",millis()/1000);
         Serial2.printf("%3d, ",seq/1000);
@@ -568,13 +596,14 @@ void timerInterrupt(void) {
         Serial2.printf("%7d, ",total_count3);
         Serial2.printf("%5d, ",distance1);
         Serial2.printf("%5d, ",distance2);
-        Serial2.printf("%2d\n",duration);
+        Serial2.printf("%2d",duration);
+        Serial2.printf("\n");
       }
       break;
-    case 4:      
+    case 40:      
       battery_persent = getBatteryLevel();
       break;
-    case 5:      
+    case 50:      
       if( sleep_flag ) {
         if( pattern == 0 && !avatar_flag && duration == 0 ) {
           avatar_cnt++;
@@ -588,7 +617,7 @@ void timerInterrupt(void) {
           avatar_cnt = 0;
         }
       }
-      if(lcd_pattern>=1) {
+      if(lcd_pattern>=10) {
         lcd_flag = true;
       } else {
         lcd_cnt++;
@@ -597,7 +626,7 @@ void timerInterrupt(void) {
           lcd_cnt = 0;
         }
       }      
-      iTimer10 = 0;
+      iTimer50 = 0;
       break;
     }
   }
@@ -889,20 +918,43 @@ void initLCD(void) {
     M5.Lcd.setTextSize(2);
     M5.Lcd.printf("ALL SYSTEMS ARE REDAY");  
     break;
-  case 1:
+  //case 10:
+  //  M5.Lcd.setTextColor(WHITE, BLACK);
+  //  M5.Lcd.setCursor(10, 10);
+  //  M5.Lcd.printf("Total Counter 1:"); 
+  //  M5.Lcd.setCursor(10, 40);
+  //  M5.Lcd.printf("Total Counter 2:"); 
+  //  M5.Lcd.setCursor(10, 70);
+  //  M5.Lcd.printf("Total Counter 3:"); 
+  //  M5.Lcd.setCursor(10, 100);
+  //  M5.Lcd.printf("Distance1 :"); 
+  //  M5.Lcd.setCursor(10, 130);
+  //  M5.Lcd.printf("Distance2 :"); 
+  //break;
+  case 10:
     M5.Lcd.setTextColor(WHITE, BLACK);
     M5.Lcd.setCursor(10, 10);
-    M5.Lcd.printf("Total Counter 1:"); 
-    M5.Lcd.setCursor(10, 40);
-    M5.Lcd.printf("Total Counter 2:"); 
+    M5.Lcd.printf("AX:"); 
+    M5.Lcd.setCursor(10, 30);
+    M5.Lcd.printf("AY:"); 
+    M5.Lcd.setCursor(10, 50);
+    M5.Lcd.printf("AZ:"); 
     M5.Lcd.setCursor(10, 70);
-    M5.Lcd.printf("Total Counter 3:"); 
-    M5.Lcd.setCursor(10, 100);
-    M5.Lcd.printf("Distance1 :"); 
+    M5.Lcd.printf("GX:"); 
+    M5.Lcd.setCursor(10, 90);
+    M5.Lcd.printf("GY:"); 
+    M5.Lcd.setCursor(10, 110);
+    M5.Lcd.printf("GZ:"); 
     M5.Lcd.setCursor(10, 130);
-    M5.Lcd.printf("Distance2 :"); 
+    M5.Lcd.printf("DX:"); 
+    M5.Lcd.setCursor(10, 150);
+    M5.Lcd.printf("DY:"); 
+    M5.Lcd.setCursor(10, 170);
+    M5.Lcd.printf("DZ:"); 
+    M5.Lcd.setCursor(10, 190);
+    M5.Lcd.printf("T:"); 
   break;
-  case 2:   
+  case 20:   
     M5.Lcd.setTextColor(WHITE, BLACK);
     M5.Lcd.setCursor(10, 10);
     M5.Lcd.printf("Climbing Height:"); 
@@ -966,21 +1018,45 @@ void lcdDisplay(void) {
       }      
       lcd_flag = false; 
       break;
-    case 1:
+    //case 10:
+    //  M5.Lcd.setTextColor(WHITE, BLACK);
+    //  M5.Lcd.setCursor(220, 10);
+    //  M5.Lcd.printf("%7d", total_count1); 
+    //  M5.Lcd.setCursor(220, 40);
+    //  M5.Lcd.printf("%7d", total_count2); 
+    //  M5.Lcd.setCursor(220, 70);
+    //  M5.Lcd.printf("%7d", total_count3);
+    //  M5.Lcd.setCursor(220, 100);
+    //  M5.Lcd.printf("%7d", distance1);
+    //  M5.Lcd.setCursor(220, 130);
+    //  M5.Lcd.printf("%7d", distance2);
+    //  lcd_flag = false;
+    //  break;
+    case 10:
       M5.Lcd.setTextColor(WHITE, BLACK);
       M5.Lcd.setCursor(220, 10);
-      M5.Lcd.printf("%7d", total_count1); 
-      M5.Lcd.setCursor(220, 40);
-      M5.Lcd.printf("%7d", total_count2); 
+      M5.Lcd.printf("%2.2f", accX); 
+      M5.Lcd.setCursor(220, 30);
+      M5.Lcd.printf("%2.2f", accY); 
+      M5.Lcd.setCursor(220, 50);
+      M5.Lcd.printf("%2.2f", accZ);
       M5.Lcd.setCursor(220, 70);
-      M5.Lcd.printf("%7d", total_count3);
-      M5.Lcd.setCursor(220, 100);
-      M5.Lcd.printf("%7d", distance1);
+      M5.Lcd.printf("%3.2f", gyroX);
+      M5.Lcd.setCursor(220, 90);
+      M5.Lcd.printf("%3.2f", gyroY);
+      M5.Lcd.setCursor(220, 110);
+      M5.Lcd.printf("%3.2f", gyroZ);
       M5.Lcd.setCursor(220, 130);
-      M5.Lcd.printf("%7d", distance2);
+      M5.Lcd.printf("%3.2f", pitch);
+      M5.Lcd.setCursor(220, 150);
+      M5.Lcd.printf("%3.2f", roll);
+      M5.Lcd.setCursor(220, 170);
+      M5.Lcd.printf("%3.2f", yaw);
+      M5.Lcd.setCursor(220, 190);
+      M5.Lcd.printf("%2.2f", temp);
       lcd_flag = false;
       break;
-    case 2:
+    case 20:
       M5.Lcd.setTextColor(WHITE, BLACK);
       M5.Lcd.setCursor(220, 10);
       M5.Lcd.printf("%7d", climbing_height); 
@@ -1026,7 +1102,7 @@ void buttonAction(void){
     } 
   } else if (M5.BtnB.wasPressed()) {
     if( pattern == 0 ) {
-      lcd_pattern = 1;
+      lcd_pattern = 10;
       avatar_cnt = 0;
       initLCD();
     } else if ( pattern == 1 ) {
@@ -1036,13 +1112,13 @@ void buttonAction(void){
       avatar.setColorPalette(*cps[0]);
       M5.Lcd.clear();  
       pattern = 0;    
-      lcd_pattern = 1;
+      lcd_pattern = 10;
       initLCD();
       avatar_cnt = 0;      
     } 
   } else if (M5.BtnC.wasPressed()) {
     if( pattern == 0 ) {
-      lcd_pattern = 2;
+      lcd_pattern = 20;
       avatar_cnt = 0;
       initLCD();
     } else if ( pattern == 1 ) {
@@ -1052,7 +1128,7 @@ void buttonAction(void){
       avatar.setColorPalette(*cps[0]);
       M5.Lcd.clear();     
       pattern = 0; 
-      lcd_pattern = 2;
+      lcd_pattern = 20;
       initLCD();
       avatar_cnt = 0;      
     } 
