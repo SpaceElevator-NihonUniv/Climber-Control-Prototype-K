@@ -133,20 +133,22 @@ char     xbee_rx_buffer[16];
 int      xbee_index = 0;
 
 // Main
-unsigned char pattern = 0;
-long seq;
-long seq_buff;
-long seq_comp = 0;
-unsigned long time_buff = 0;
-bool  lcd_flag = false;
-unsigned int start_cnt = 0;
-unsigned int climbing_height = 15;
-unsigned char climbing_velocity = 100;
-unsigned char climbing_accel = 20;
-unsigned char decending_velocity = 5;
-unsigned char starting_delay = 15;
-unsigned char interval_time = 10;
-bool sleep_flag = true;
+String f270 = "/font/Arial270";
+volatile unsigned char pattern = 0;
+volatile long seq;
+volatile long seq_buff;
+volatile long seq_comp = 0;
+volatile unsigned long time_buff = 0;
+volatile bool  lcd_flag = false;
+volatile unsigned int start_cnt = 0;
+volatile unsigned int climbing_height = 15;
+volatile unsigned char climbing_velocity = 100;
+volatile unsigned char climbing_accel = 20;
+volatile unsigned char decending_velocity = 5;
+volatile unsigned char starting_delay = 15;
+volatile unsigned char interval_time = 10;
+volatile bool sleep_flag = true;
+bool sd_insert = false;
 
 // MPU
 float accX = 0.0F;
@@ -249,9 +251,7 @@ void setup() {
 
   pinMode(rssiPin, INPUT);
   pinMode(21, INPUT_PULLUP);
-  pinMode(22, INPUT_PULLUP);
-
-  xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 4096, NULL, 1, &task_handl, 0);
+  pinMode(22, INPUT_PULLUP); 
 
   M5.Lcd.setTextSize(2);
   
@@ -278,7 +278,6 @@ void setup() {
 
   if( sleep_flag ) {
     faces[0] = avatar.getFace();
-    faces[1] = new DogFace();
 
     cps[0] = new ColorPalette();
     cps[1] = new ColorPalette();
@@ -295,7 +294,10 @@ void setup() {
     delay(100);  
     M5.Lcd.clear(); 
   } 
-  initLCD();  
+
+  xTaskCreatePinnedToCore(&taskDisplay, "taskDisplay", 6144, NULL, 1, &task_handl, 0);
+
+  initLCD();    
   
 }
 
@@ -314,6 +316,16 @@ void loop() {
 
   case 1:
     buttonAction();
+    break;
+
+  // Emargency Escape
+  case 2:
+    if(M5.Lcd.fontsLoaded()){
+      M5.Lcd.unloadFont();
+    }
+    pattern = 0;
+    M5.Lcd.clear();  
+    initLCD();    
     break;
 
   case 11:
@@ -360,7 +372,8 @@ void taskDisplay(void *pvParameters){
 
   disableCore0WDT();
 
-  SD.begin(4, SPI, 40000000);
+  sd_insert = SD.begin(TFCARD_CS_PIN, SPI, 40000000);
+
   // Create Log File  
   fname_buff  = "/Climber_log.csv";
   fname = fname_buff.c_str(); 
@@ -627,6 +640,14 @@ void xbee_rx(void) {
           M5.Lcd.clear();
           Serial2.printf("\n");
           tx_pattern = 101;
+          M5.Lcd.setCursor(20, 20);
+          M5.Lcd.setTextSize(4);
+          M5.Lcd.printf("UPCOMING:");  
+          M5.Lcd.setCursor(20, 100);
+          M5.Lcd.setTextSize(7);
+          M5.Lcd.printf("LIFTOFF"); 
+          delay(1000);
+          M5.Lcd.loadFont(f270, SD);
           pattern = 201;
         } else {
           tx_pattern = 1;
@@ -718,15 +739,22 @@ void xbee_rx(void) {
       rx_pattern = 0;
       tx_pattern = 101;
       Serial2.printf("\n");
+    } else if( xbee_rx_buffer[xbee_index] == 'W' || xbee_rx_buffer[xbee_index] == 'w' ) {
+      if ( pattern == 1 ) {
+        avatar.stop();
+        delay(100);
+        avatar_flag = false;
+        avatar.setColorPalette(*cps[0]);
+        avatar_cnt = 0;    
+        pattern = 2;             
+      } 
     } else if( xbee_rx_buffer[xbee_index] == ' ') {
-      pattern = 0;
+      pattern = 2;
       Serial2.printf("\n");
       Serial2.printf(" Emargency Stop Enable \n");
       Serial2.printf(" Return Case 0 \n");
       rx_pattern = 0;
-      tx_pattern = 1;
-      //M5.Lcd.clear();  
-      //initLCD();
+      tx_pattern = 1;      
       Serial2.printf("\n");
     } else {
         xbee_index++;
@@ -847,8 +875,11 @@ void initLCD(void) {
     M5.Lcd.setTextColor(WHITE, BLACK);
     M5.Lcd.setCursor(20, 10);
     M5.Lcd.setTextSize(2);
-    M5.Lcd.printf("Operating T+:");  
+    M5.Lcd.printf("T+:");  
     M5.Lcd.setCursor(20, 60);
+    if( sd_insert ) {
+      M5.Lcd.drawJpgFile(SD, "/icon/icons8-sd.jpg", 212, 0);
+    }
     M5.Lcd.setTextSize(4);
     M5.Lcd.printf("Case");  
     M5.Lcd.setCursor(100, 100);
@@ -895,14 +926,22 @@ void initLCD(void) {
 // LCD Display
 //------------------------------------------------------------------//
 void lcdDisplay(void) {
+  unsigned int time_calc, time_h, time_m, time_s;
 
   if( lcd_flag ) {    
     // Refresh Display
     switch (lcd_pattern) {
-    case 0:     
-      M5.Lcd.setCursor(190, 10);
+    case 0:
+      time_calc = millis() / 1000;
+      time_h = time_calc / 3600;
+      time_calc %= 3600;
+      time_m = time_calc / 60;
+      time_calc %= 60;
+      time_s = time_calc;  
+
       M5.Lcd.setTextSize(2);
-      M5.Lcd.printf("%4d", millis()/1000);  
+      M5.Lcd.setCursor(60, 10);
+      M5.Lcd.printf("%02d:%02d:%02d", time_h, time_m, time_s);
       if( battery_persent == 100) {
         M5.Lcd.drawJpgFile(SD, "/icon/icons8-battery-level-100.jpg", 290, 0);
       } else if( battery_persent == 75) {
@@ -924,7 +963,7 @@ void lcdDisplay(void) {
         M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-25.jpg", 250, 0);
       } else {
         M5.Lcd.drawJpgFile(SD, "/icon/icons8-signal-0.jpg", 250, 0);
-      }
+      }      
       lcd_flag = false; 
       break;
     case 1:
@@ -1028,6 +1067,14 @@ void buttonAction(void){
     M5.Lcd.clear();
     Serial2.printf("\n");
     tx_pattern = 101;
+    M5.Lcd.setCursor(20, 20);
+    M5.Lcd.setTextSize(4);
+    M5.Lcd.printf("UPCOMING:");  
+    M5.Lcd.setCursor(20, 100);
+    M5.Lcd.setTextSize(7);
+    M5.Lcd.printf("LIFTOFF"); 
+    delay(1000);
+    M5.Lcd.loadFont(f270, SD);
     pattern = 201;
   }
 }
@@ -1270,62 +1317,13 @@ void start_sequence(void) {
     start_pattern = starting_delay - seq/1000; 
     seq_comp = seq/1000;
 
-    switch (start_pattern) {
-      case 10:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-10.jpg", 0, 0);
-        break;
-      case 9:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-9.jpg", 0, 0);
-        break;
-      case 8:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-8.jpg", 0, 0);
-        break;
-      case 7:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-7.jpg", 0, 0);
-        break;
-      case 6:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-6.jpg", 0, 0);
-        break;
-      case 5:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-5.jpg", 0, 0);
-        break;
-      case 4:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-4.jpg", 0, 0);
-        break;
-      case 3:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-3.jpg", 0, 0);
-        break;
-      case 2:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-2.jpg", 0, 0);
-        break;
-      case 1:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-1.jpg", 0, 0);
-        break;
-      case 0:
-        M5.Lcd.clear();
-        M5.Lcd.drawJpgFile(SD, "/icon/count-0.jpg", 0, 0);
-        pattern = 202;
-        break;
+    M5.Lcd.clear();
+    M5.Lcd.setCursor(10, 20);
+    M5.Lcd.printf("%2d", start_pattern);
 
-      default:
-        M5.Lcd.setTextColor(WHITE, BLACK);
-        M5.Lcd.setCursor(20, 20);
-        M5.Lcd.setTextSize(4);
-        M5.Lcd.printf("UPCOMING:");  
-        M5.Lcd.setCursor(20, 100);
-        M5.Lcd.setTextSize(7);
-        M5.Lcd.printf("LIFTOFF"); 
-        break;
-    }    
+    if( start_pattern <= 0 ) {
+      M5.Lcd.unloadFont();
+      pattern = 202;
+    }
   }
 }
